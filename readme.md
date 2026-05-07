@@ -68,9 +68,6 @@ bash scripts/train_dope.sh --finetune
 python scripts/data_prep/eval/evaluate_on_val.py \
     --weights weights/f5_noapril_ransac_loo_realonly/final_net_epoch_0096.pth \
     --val_dir data/pallet/training_data/val
-
-# 실시간 추론 (Docker + RealSense D435i)
-docker compose up
 ```
 
 ## 디렉토리 구조
@@ -104,7 +101,7 @@ FoundationPose/
 │   │   ├── augmentations.py              Weak/Strong augmentation
 │   │   └── metrics.py                    6D 포즈 메트릭
 │   ├── dope/
-│   │   └── run_dope_live.py          # 실시간 추론 (RealSense D435i)
+│   │   └── run_dope_live.py          # 실시간 추론 (RealSense D435i, native)
 │   ├── train_dope.sh                 # DOPE 학습 스크립트 (config 기반)
 │   └── launch_tensorboard.py         # TensorBoard 실행
 ├── Deep_Object_Pose/                 # DOPE 구현 (VGG-19 backbone)
@@ -122,8 +119,6 @@ FoundationPose/
 │   ├── pallet_category/              # Pretrain weight (ep60)
 │   ├── pallet_v11/                   # Fine-tune weight (ep91)
 │   └── pallet_v11_far/              # 원거리 보강 weight (ep121) ← 최신
-├── docker/                           # Docker 설정
-├── docker-compose.yml                # 실시간 추론용 Compose
 └── _docs/                            # 연구 설계 문서
 ```
 
@@ -163,7 +158,7 @@ pip install -r requirements.txt
 | `config/default.yaml` → `paths.python_exe` | `C:/Users/.../python.exe` | conda python 경로로 변경 |
 | `train.workers` | `0` (필수) | `4` 이상 가능 |
 | `generate_all.sh` 프로세스 정리 | `wmic`/`taskkill` | `pgrep`/`kill` |
-| Isaac Sim | standalone 설치 | Docker 또는 standalone |
+| Isaac Sim | standalone 설치 | standalone 설치 |
 
 ## 설정 파일
 
@@ -297,14 +292,25 @@ python scripts/data_prep/visualize_inference.py \
 
 **Best weight**: `weights/pallet_v11_far/final_net_epoch_0121.pth`
 
-## 실시간 추론 (Docker)
+## 실시간 추론 (RealSense D435i)
+
+Intel RealSense SDK + pyrealsense2 만 있으면 native 로 실행 가능 (Docker 불필요).
 
 ```bash
-docker compose build
-docker compose up
+# 1. RealSense SDK 설치 (한 번만, Windows installer)
+#    https://www.intelrealsense.com/sdk-2/
+
+# 2. Python 바인딩
+conda activate pallet-pose
+pip install pyrealsense2
+
+# 3. 카메라 USB 연결 후 실행
+python scripts/dope/run_dope_live.py \
+    --realsense \
+    --weights weights/f5_noapril_ransac_loo_realonly/final_net_epoch_0096.pth
 ```
 
-RealSense D435i 카메라 연결 필요. GPU 패스스루 + USB 디바이스 마운트.
+키 조작: `q`=종료, `s`=프레임 저장, `b`=belief map 토글, belief 클릭 → keypoint 자동 threshold 튜닝
 
 ## Gotchas
 

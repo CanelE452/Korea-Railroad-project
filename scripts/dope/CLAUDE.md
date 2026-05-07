@@ -1,12 +1,12 @@
 # scripts/dope/
 
-DOPE 모델 실시간 추론. RealSense D435i 카메라 연동.
+DOPE 모델 실시간 추론. RealSense D435i 카메라 연동. **Native 실행** (Docker 불필요).
 
 ## 스크립트
 
 | 파일 | 설명 | 사용법 |
 |------|------|--------|
-| `run_dope_live.py` | RealSense D435i로 실시간 팔레트 6D 포즈 추정 | Docker 컨테이너 내 실행 (`docker compose up`) |
+| `run_dope_live.py` | RealSense D435i로 실시간 팔레트 6D 포즈 추정 | `python run_dope_live.py --realsense --weights <path>` |
 
 ## 키 조작 (run_dope_live.py)
 
@@ -18,6 +18,7 @@ DOPE 모델 실시간 추론. RealSense D435i 카메라 연동.
 
 ## 실행 환경
 
-- Docker: `docker-compose.yml` (호스트의 RealSense USB 연결 필요)
-- 원클릭 런처: `scripts/launch_v2.ps1` (usbipd USB attach → Docker build → compose up)
-- 가중치: `config/default.yaml`의 `train.pretrain.output_dir` 또는 `train.finetune.output_dir` 참조
+- conda env: `pallet-pose` (`conda activate pallet-pose`)
+- 추가 의존성: `pip install pyrealsense2` + Intel RealSense SDK (Windows installer)
+- 카메라: USB 직결 (D435i)
+- 가중치: HF Hub 에서 받거나 `config/default.yaml`의 `train.finetune.output_dir` 참조

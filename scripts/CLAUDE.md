@@ -30,12 +30,11 @@ scripts/
 │   ├── metrics.py                   ADD, 5cm5°, Reproj
 │   └── _smoke_test_filter_dispatch.py
 │
-├── dope/                            ← Docker 실시간 추론
+├── dope/                            ← 실시간 추론 (native, RealSense)
 │   └── run_dope_live.py
 │
 ├── train_dope.sh                    ← DOPE 학습 진입점 (conda: pallet-pose)
 ├── launch_tensorboard.py
-├── launch_v2.ps1                    ← Docker 런처 (PowerShell)
 └── compare_experiments.py           실험 비교 유틸
 ```
 
@@ -49,8 +48,7 @@ import 못 하므로 상단에 `sys.path.insert(0, os.path.join(__file__, ".."))
 | 환경 | 디렉토리/파일 | 실행 방법 |
 |------|--------------|-----------|
 | **Isaac Sim** | `data_prep/isaac_sim/` | Isaac Sim 내장 Python으로 standalone 실행 |
-| **PyTorch** | `data_prep/*.py`, `self_training/`, `train_dope.sh` | `conda activate pallet-pose` |
-| **Docker** | `dope/`, `launch_v2.ps1` | `docker compose up` |
+| **PyTorch** | `data_prep/*.py`, `self_training/`, `train_dope.sh`, `dope/run_dope_live.py` | `conda activate pallet-pose` (실시간 추론은 추가로 `pip install pyrealsense2`) |
 
 ## 설정 파일 참조
 

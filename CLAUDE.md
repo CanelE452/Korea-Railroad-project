@@ -31,7 +31,7 @@ Python + PyTorch + Isaac Sim + DOPE.
 - Annotation 시각화: `python scripts/data_prep/visualize/visualize_annotations.py`
 - 추론 시각화: `python scripts/data_prep/visualize_inference.py --weights <path> --num_syn 10 --num_real 10`
 - 데이터 검증: `python scripts/data_prep/validate/merge_and_validate.py`, `python scripts/data_prep/validate/verify_keypoints.py`
-- 실시간 추론: `docker compose up` → RealSense D435i + DOPE live
+- 실시간 추론 (native): `python scripts/dope/run_dope_live.py --realsense --weights <path>` (RealSense SDK + `pip install pyrealsense2` 필요)
 
 ## Architecture
 
@@ -46,7 +46,7 @@ Python + PyTorch + Isaac Sim + DOPE.
 - **평가 (Synthetic val)**: PCK@3/5/10px + PnP Reproj + Volume Ratio — `scripts/data_prep/eval/evaluate_on_val.py`
 - **평가 (Real test)**: ADD + 5cm5° + Reproj — `scripts/data_prep/eval/evaluate_real.py` (AprilTag GT 기반)
 - **Real data**: seen/unseen/unlabeled/dev split — `data/pallet/real_data/`
-- 실시간 추론: `scripts/dope/run_dope_live.py` + RealSense D435i (Docker container)
+- 실시간 추론: `scripts/dope/run_dope_live.py` + RealSense D435i (native, pyrealsense2)
 - 팔레트 규격: KS T-11형 1100×1100×150mm (config에서 관리)
 
 ## Code Style
@@ -55,7 +55,6 @@ Python + PyTorch + Isaac Sim + DOPE.
 - 설정은 `config/default.yaml`에서 중앙 관리 (`train_dope.sh`가 yaml 읽음)
 - Isaac Sim 스크립트는 standalone 실행 (Isaac Sim 내장 Python), 모듈화: `scripts/data_prep/isaac_sim/sdg_*.py`
 - DOPE 데이터 로더: CleanVisiiDopeLoader (`{i:06d}.png` + `{i:06d}.json` 쌍)
-- Docker: `docker-compose.yml` (실시간 추론), `.devcontainer/` (Claude Code 개발환경)
 
 ## Gotchas
 
@@ -74,6 +73,5 @@ Python + PyTorch + Isaac Sim + DOPE.
 - [ ] Isaac Sim 스크립트 수정 시 ORIENTATION_OVERRIDES 건드리지 않았는가?
 - [ ] 새 스크립트 추가 시 재현성을 위한 config/argparse 지원이 있는가?
 - [ ] Geometric Filter 임계값 변경 시 `config/stage3_selftrain.yaml`에 반영했는가?
-- [ ] Docker 관련 변경 시 `docker-compose.yml`과 Dockerfile 일관성 유지했는가?
 - [ ] 학습 설정(sigma, batch, lr) 변경 시 `scripts/train_dope.sh`와 `_docs/method/step1_synthetic_data.md` 3.6절 동기화했는가?
 - [ ] 생성된 이미지/overlay 확인 시 각 프레임을 개별 로드하여 변경 사항(적재물, 카메라 높이, 배경 등)이 실제 반영되었는지 눈으로 검증했는가? 로그만 보고 판단하지 않는다.
