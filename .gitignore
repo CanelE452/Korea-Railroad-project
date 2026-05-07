@@ -24,6 +24,9 @@ run_used.yml
 .claude/cache/
 .claude/tasks/
 
+# Project-local MCP server config (machine-specific paths)
+.mcp.json
+
 # Build artifacts
 build/
 BundleTrack/build
