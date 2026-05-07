@@ -1,0 +1,130 @@
+# ===========================
+# Project-specific
+# ===========================
+_archive/
+data/
+weights/
+debug/
+logs/
+demo_data/
+foundationpose/
+exp/
+wandb/
+sacred/
+artifacts/
+output/
+run_used.yml
+
+# nested git backups
+.git.bak/
+**/.git.bak/
+
+# Claude Code local state
+.claude/scheduled_tasks.lock
+.claude/cache/
+.claude/tasks/
+
+# Build artifacts
+build/
+BundleTrack/build
+*.so
+
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pth
+*.egg
+*.egg-info/
+.installed.cfg
+MANIFEST
+develop-eggs/
+eggs/
+.eggs/
+dist/
+sdist/
+lib/
+lib64/
+parts/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# ===========================
+# Environments
+# ===========================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.Python
+.python-version
+__pypackages__/
+
+# ===========================
+# IDE / Editor
+# ===========================
+.vscode/
+.history
+.spyderproject
+.spyproject
+.ropeproject
+
+# ===========================
+# Testing / Coverage
+# ===========================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# ===========================
+# Type checkers
+# ===========================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# ===========================
+# Misc
+# ===========================
+*.log
+*.blend1
+*.tar.*
+*.zip
+*.manifest
+*.spec
+*.mo
+*.pot
+*.svg
+pip-log.txt
+pip-delete-this-directory.txt
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+celerybeat-schedule
+celerybeat.pid
+*.sage.py
+/site
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+.webassets-cache
+cosypose/experiments
+.scrapy
+docs/_build/

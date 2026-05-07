@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "isaac-sim": {
+      "command": "uv",
+      "args": ["run", "C:/Users/minjae/Documents/isaac-sim-mcp/isaac_mcp/server.py"]
+    }
+  }
+}

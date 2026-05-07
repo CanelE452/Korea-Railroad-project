@@ -1,0 +1,110 @@
+# Stage 3: FixMatch-based Self-Training Configuration
+# Paper: Unsupervised Domain Adaptation for Pallet 6D Pose Estimation
+#
+# pallet, camera 설정은 config/default.yaml에서 관리 (단일 소스).
+# 이 파일은 self-training 전용 설정만 포함.
+
+# --- Self-Training ---
+self_training:
+  num_rounds: 10
+  epochs_per_round: 3
+  optimizer: adam
+  learning_rate: 1.0e-5
+  weight_decay: 1.0e-4
+  batch_size: 8
+  lambda_real: 1.0           # weight for pseudo-label loss
+  synthetic_ratio: 0.5       # ratio of synthetic data per batch
+  image_size: 448             # DOPE input size
+  belief_map_size: 56         # DOPE output: 448/8 = 56
+  sigma: 2.0                 # Gaussian sigma for belief map generation
+  num_workers: 4
+  convergence_threshold: 0.01  # stop if acceptance rate change < 1% for 3 rounds
+  convergence_patience: 3
+
+# --- Geometric Filter ---
+# Filter selection driven by `filter_type` (see 2026-04-11 ablation plan):
+#   ransac  : RANSAC subset consensus (F11, default — selected via GT P/R)
+#   bc      : canonical B ∧ C (F7, ablation baseline)
+#   conf    : confidence-only (F1, naive baseline)
+#   none    : no filter — accept if min_keypoints met (F0, upper bound on recall)
+# See _docs/filter/2026-04-11_selection.md for the P/R comparison.
+geometric_filter:
+  filter_type: ransac          # ransac | bc | conf | none | ransac_loo
+
+  # RANSAC + LOO (filter_type = ransac_loo)
+  loo_tau: 0.05                  # LOO cross-validation threshold
+
+  # RANSAC subset consensus (filter_type = ransac)
+  ransac_n_iter: 50            # RANSAC iterations
+  ransac_subset: 5             # keypoints per subset for EPnP
+  ransac_reproj_px: 5.0        # inlier distance threshold (pixels)
+  ransac_min_consensus: 6      # minimum inliers for accept (sweet spot)
+
+  # Physical size sanity check (meters) — always applied as post-check
+  tau_size_min: 0.5            # estimated pallet width min
+  tau_size_max: 2.5            # estimated pallet width max
+
+  # Canonical B ∧ C thresholds (filter_type = bc)
+  bc_tau_span: 0.35            # B1: visible span ratio
+  bc_tau_end: 0.10             # B2: endpoint support (normalized)
+  bc_tau_nc: 0.02              # B3: non-collinearity
+  bc_tau_C: 0.05               # C: LOO PnP stability (normalized)
+  bc_min_kps_B: 4              # filter_B min detected keypoints
+  bc_min_kps_C: 5              # filter_C min detected keypoints
+
+  # Confidence-only (filter_type = conf)
+  conf_min: 0.5                # min belief peak value per detected keypoint
+
+  # Minimum detected keypoints (pre-filter, all types)
+  min_keypoints: 5
+
+  # RNG seed for reproducibility of RANSAC subsets
+  seed: 0
+
+# --- PnP Solver ---
+pnp:
+  method: epnp               # cv2.SOLVEPNP_EPNP
+  use_ransac: true
+  ransac_reproj_threshold: 8.0
+  ransac_iterations: 100
+
+# --- Augmentations ---
+augmentation:
+  weak:
+    brightness: 0.1           # +/- range
+    contrast: 0.1
+    gaussian_noise_std: 0.01
+  strong:
+    brightness: 0.4
+    contrast: 0.4
+    saturation: 0.4
+    hue: 0.1
+    random_erasing_prob: 0.5
+    random_erasing_scale: [0.02, 0.2]
+    gaussian_blur_prob: 0.5
+    gaussian_blur_kernel: [3, 7]
+    gaussian_noise_std: 0.05
+
+# --- Logging ---
+logging:
+  log_interval: 100
+  save_every_round: true
+
+# --- Camera ---
+camera:
+  fx: 615.0
+  fy: 615.0
+  cx: 320.0
+  cy: 240.0
+
+# --- Pallet ---
+pallet:
+  width: 1.1
+  depth: 1.1
+  height: 0.15
+
+# --- Paths (self-training 전용, 나머지는 default.yaml 참조) ---
+paths:
+  real_unlabeled: data/pallet/real_unlabeled
+  pretrained_weights: weights/pallet_category/net_pallet_best.pth
+  output_dir: output/stage3_selftrain

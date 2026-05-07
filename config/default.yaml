@@ -1,0 +1,112 @@
+# =============================================================================
+# Pallet 6D Pose Estimation — Default Configuration
+# =============================================================================
+# 모든 학습/평가 설정의 단일 소스. 스크립트에서 하드코딩 대신 이 파일을 참조.
+# Stage별 override: stage3_selftrain.yaml (self-training 전용 설정)
+
+# --- Model ---
+model:
+  architecture: dope              # DOPE (VGG-19 backbone)
+  num_keypoints: 9                # 8 cuboid corners + 1 centroid
+  num_belief_maps: 9              # one per keypoint
+  num_affinity_fields: 16         # 8 edges × 2 (x, y)
+  input_size: 448                 # network input resolution
+  output_size: 50                 # belief map resolution (DOPE 실제 출력, train.py 하드코딩)
+  pretrained_backbone: true       # ImageNet pretrained VGG-19
+
+# --- Training ---
+train:
+  # Pretrain (from scratch on synthetic data)
+  pretrain:
+    epochs: 60
+    batch_size: 4
+    learning_rate: 1.0e-4
+    output_dir: weights/pallet_category
+
+  # Finetune (from pretrained weights)
+  finetune:
+    epochs: 91
+    batch_size: 4
+    learning_rate: 5.0e-5
+    output_dir: weights/pallet_v11
+    pretrained_weights: weights/pallet_category/final_net_epoch_0060.pth
+
+  # Common
+  optimizer: adam
+  weight_decay: 0.0               # DOPE 기본값 (no weight decay)
+  sigma: 4.0                      # belief map Gaussian std (sigma<1 → gradient vanishing)
+  workers: 0                      # Windows에서는 0 (multiprocessing 이슈)
+  save_every: 5                   # checkpoint 저장 주기 (epochs)
+  log_interval: 100               # batch 단위 콘솔 출력 주기
+  seed: null                      # null → random seed
+
+# --- Loss ---
+loss:
+  type: mse                       # Mean Squared Error (pixel-wise)
+  belief_weight: 1.0              # belief map loss 가중치
+  affinity_weight: 1.0            # affinity field loss 가중치
+  # total_loss = belief_weight * L_belief + affinity_weight * L_affinity
+
+# --- Data ---
+data:
+  object: pallet
+  train_dir: data/pallet/training_data/train
+  val_dir: data/pallet/training_data/val
+  format: ndds                    # NDDS format ({i:06d}.png + {i:06d}.json)
+  min_train_images: 100           # 최소 학습 이미지 수 (미만이면 에러)
+  augmentation:
+    resize: 448                   # input resize
+    # 추가 augmentation은 stage3_selftrain.yaml 참조
+
+# --- Pallet Spec ---
+pallet:
+  # KS T-11형 standard pallet (meters)
+  width: 1.1                      # X axis (medium)
+  depth: 1.1                      # Z axis (long)
+  height: 0.15                    # Y axis (up)
+  keypoint_convention: "y_up"     # Y=UP, 8 cuboid corners + centroid
+
+# --- Camera Intrinsics ---
+camera:
+  fx: 615.0
+  fy: 615.0
+  cx: 320.0
+  cy: 240.0
+  width: 640
+  height: 480
+
+# --- Evaluation ---
+eval:
+  metrics:
+    - pck_3px                     # Percentage of Correct Keypoints @ 3px
+    - pck_5px
+    - pck_10px
+    - pnp_reproj                  # PnP reprojection error
+  max_frames: 200                 # val 평가 시 최대 프레임 수
+
+# --- Logging & TensorBoard ---
+logging:
+  tensorboard: true
+  log_dir_suffix: runs/           # {output_dir}/runs/ 에 이벤트 저장
+  scalars:                        # TensorBoard에 기록되는 스칼라 목록
+    - loss/train_loss             # total loss (belief + affinity)
+    - loss/train_bel              # belief map loss
+    - loss/train_aff              # affinity field loss
+  images:                         # TensorBoard에 기록되는 이미지 (epoch 시작 시)
+    - train_input                 # 원본 입력 이미지
+    - train_belief_ground_truth   # GT belief map
+    - train_belief_guess          # predicted belief map
+  server:
+    port: 6006
+    reload_interval: 30
+
+# --- Paths ---
+paths:
+  python_exe: "python"           # Windows: conda python 전체 경로, Ubuntu: "python"
+  dope_train_script: "Deep_Object_Pose/train/train.py"
+  eval_script: "scripts/data_prep/evaluate_on_val.py"
+  tensorboard_script: "scripts/launch_tensorboard.py"
+
+# --- Notification ---
+notification:
+  ntfy_topic: minjae-pallet-pose  # ntfy.sh topic for training completion alerts
