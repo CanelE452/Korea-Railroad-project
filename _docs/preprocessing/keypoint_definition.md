@@ -1,16 +1,28 @@
 # 키포인트 정의
 
+> **컨벤션 결정 (2026-05-22)** — **Camera-facing convention 채택**.
+> 0~3 = 카메라에 보이는 **가까운 면 (near face)**, 4~7 = 반대편 (far face).
+> forklift 운용 시나리오 (카메라 = forklift 전방 = 항상 fork pocket 면 본다) 하에서
+> 0~3 = fork pocket 면 자동 일치. 이전 object-fixed 정의는 **deprecated**.
+> 결정 근거 + 영향: `project_keypoint_convention_decision.md` 메모리 + `_docs/history/2026-05-22.md`
+
 ## 1. 3D Cuboid Convention
 
 팔레트를 감싸는 직육면체(cuboid)의 8개 꼭짓점 + 1개 centroid로 포즈를 표현한다.
 
-### Y=UP Convention
+### Y=UP Convention (3D 좌표계)
 
 모든 3D 모델에서 **Y축이 위(UP)** 를 향하도록 정규화한다.
 
 - `X` — 수평 폭 (medium, ~1.1m)
-- `Y` — 높이 (height, ~0.15m) → **위 방향**
-- `Z` — 수평 깊이 (depth, ~1.1m)
+- `Y` — 높이 (height, ~0.11~0.15m) → **위 방향**
+- `Z` — 수평 깊이 (depth, ~1.1~1.3m)
+
+### Near / Far face 정의 (camera-facing)
+
+- **Near face (= 0~3)**: 카메라에 가까운 면. 운용 시 = fork pocket 면 (forklift 가 fork pocket 면으로 접근하므로).
+- **Far face (= 4~7)**: 반대편. 카메라에서 멀리.
+- 어느 면이 near 인지 매 frame inference 시 결정 → post-process swap 으로 강제 (see `run_live.py`)
 
 ## 2. 키포인트 ID 매핑
 
@@ -18,7 +30,7 @@
      4 ──────── 5          ▲ y (UP)
     /|         /|          │
    / |        / |          └──── ▶ x
-  0 ──────── 1  |         /
+  0 ──────── 1  |         /  (camera direction)
   |  7 ──────|── 6       / z
   | /        | /         ▼
   |/         |/
@@ -27,21 +39,22 @@
   + centroid (8): 8개 꼭짓점의 평균
 ```
 
-⚠️ 모든 3D 모델에서 동일한 키포인트 ID 매핑 적용
+⚠️ 위 다이어그램에서 **z 축 = 카메라 방향 (camera looks toward -z)**.
+   0~3 = z_max = 카메라에 가까운 near face.
 
-### 꼭짓점 좌표 규칙
+### 꼭짓점 좌표 규칙 (cuboid local frame, Y=UP)
 
 ```
-ID    X       Y       Z       위치 설명
-──────────────────────────────────────────────
-0     min_x   max_y   max_z   상단-전면-좌
-1     max_x   max_y   max_z   상단-전면-우
-2     max_x   min_y   max_z   하단-전면-우
-3     min_x   min_y   max_z   하단-전면-좌
-4     min_x   max_y   min_z   상단-후면-좌
-5     max_x   max_y   min_z   상단-후면-우
-6     max_x   min_y   min_z   하단-후면-우
-7     min_x   min_y   min_z   하단-후면-좌
+ID    X       Y       Z       위치 설명 (camera-facing)
+──────────────────────────────────────────────────────────
+0     min_x   max_y   max_z   near-top-LEFT     (가까운 면, 위, 좌)
+1     max_x   max_y   max_z   near-top-RIGHT    (가까운 면, 위, 우)
+2     max_x   min_y   max_z   near-bottom-RIGHT (가까운 면, 아래, 우)
+3     min_x   min_y   max_z   near-bottom-LEFT  (가까운 면, 아래, 좌)
+4     min_x   max_y   min_z   far-top-LEFT      (먼 면, 위, 좌)
+5     max_x   max_y   min_z   far-top-RIGHT     (먼 면, 위, 우)
+6     max_x   min_y   min_z   far-bottom-RIGHT  (먼 면, 아래, 우)
+7     min_x   min_y   min_z   far-bottom-LEFT   (먼 면, 아래, 좌)
 8     mid     mid     mid     centroid
 ```
 
@@ -49,13 +62,22 @@ ID    X       Y       Z       위치 설명
 
 ```
 면                    꼭짓점          조건
-───────────────────────────────────────────────
-Top (화물 적재면)     {0, 1, 4, 5}   Y = max
-Bottom (바닥 접촉면)  {2, 3, 6, 7}   Y = min
-Front                 {0, 1, 2, 3}   Z = max
-Back                  {4, 5, 6, 7}   Z = min
+─────────────────────────────────────────────────────────
+Top (위)              {0, 1, 4, 5}   Y = max
+Bottom (아래)         {2, 3, 6, 7}   Y = min
+Near (카메라에 가까움) {0, 1, 2, 3}   Z = max  ★ camera-facing
+Far (멀리)            {4, 5, 6, 7}   Z = min
 Left                  {0, 3, 4, 7}   X = min
 Right                 {1, 2, 5, 6}   X = max
+```
+
+### Forklift 응용 매핑 (운용 가정)
+
+```
+forklift 전방 카메라 → 항상 fork pocket 면 본다
+                    → near face (0~3) = fork pocket 면
+                    → pose R, t 출력 = fork pocket 방향
+                    → forklift fork 진입 경로로 직접 사용
 ```
 
 ## 3. 변(Edge) 정의

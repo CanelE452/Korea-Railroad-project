@@ -15,6 +15,33 @@ artifacts/
 output/
 run_used.yml
 
+# Large data / recordings / model weights (no images in repo)
+challenge/data/
+challenge/weights/
+depth_cam/rec/
+depth_cam/runs/
+
+# Image / video / capture binaries
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tif
+*.tiff
+*.gif
+*.webp
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.bag
+
+# Backup files
+*.orig
+
+# PDF documents
+*.pdf
+
 # nested git backups
 .git.bak/
 **/.git.bak/

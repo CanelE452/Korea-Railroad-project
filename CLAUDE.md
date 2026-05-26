@@ -64,7 +64,7 @@ Python + PyTorch + Isaac Sim + DOPE.
 - 팔레트 기울기 없이 바닥 수평 고정 (tilt=0)
 - 어려운 케이스(낮은 대비, 유사 색상)는 유지 — 모델 로버스트니스에 필수
 - Belief map sigma=4.0 유지 (sigma<1은 gradient vanishing 발생, `_docs/method/step1_synthetic_data.md` 3.6절 참조)
-- 3D/렌더링 문제는 3D expert agent에게 먼저 상담 후 수정
+- **3D/2D 작업은 항상 `3d-expert` agent 에 먼저 위임** (2026-05-22 사용자 규칙). 좌표계 변환 / cuboid 라벨링 / camera convention (OpenCV vs USD vs ROS) / projection / rendering / annotation 시각화. 직접 trial-and-error 금지. v1/v2/v3 keypoint 변환 4 회 시행착오 후 3d-expert 가 한 번에 v4 해결한 경험. 자세한 근거: `feedback_3d_expert_first.md` 메모리.
 - 장시간 작업(데이터 생성, 학습 등) 실행 중에는 주기적으로 로그/프로세스를 확인하여 정상 진행 여부를 모니터링한다
 
 ## Self-Verification

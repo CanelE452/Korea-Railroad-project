@@ -79,7 +79,7 @@ def on_belief_click(event, x, y, flags, state):
     print(f"\n[Click] {name}: peak={val:.6f}")
 
     min_val = min(v for _, v in state.clicks)
-    state.auto_threshold = min_val * 0.7
+    state.auto_threshold = min_val * 1.0
     chs = sorted(set(c for c, _ in state.clicks))
     print(f"[Auto-tune] min={min_val:.6f} → threshold≈{state.auto_threshold:.6f}")
     print(f"  Clicked channels: {chs}")
@@ -165,7 +165,7 @@ def main():
     ap.add_argument("--height",    type=int, default=720)
     ap.add_argument("--dim", nargs=3, type=float, default=[80.0, 14.4, 120.0],
                     metavar=("W", "H", "L"), help="팔레트 치수 [cm]")
-    ap.add_argument("--threshold", type=float, default=0.01)
+    ap.add_argument("--threshold", type=float, default=0.10)
     ap.add_argument("--out_dir",   default="debug/live_dope")
     args = ap.parse_args()
 
@@ -204,7 +204,7 @@ def main():
     class Cfg:
         mask_edges = 1; mask_faces = 1; vertex = 1
         threshold = args.threshold; softmax = 1000; thresh_angle = 0.5
-        thresh_map = 0.001; sigma = 3; thresh_points = 0.001
+        thresh_map = 0.05; sigma = 3; thresh_points = 0.05
     cfg = Cfg()
 
     print(f"[모델] {args.weights} 로딩...")
@@ -217,9 +217,9 @@ def main():
     ctrl = "Controls"
     cv2.namedWindow(ctrl, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(ctrl, 500, 250)
-    cv2.createTrackbar("threshold(x1000)", ctrl, int(args.threshold * 1000), 100, _noop)
-    cv2.createTrackbar("thresh_map(x1000)", ctrl, 1, 50, _noop)
-    cv2.createTrackbar("thresh_pts(x1000)", ctrl, 1, 50, _noop)
+    cv2.createTrackbar("threshold(x1000)", ctrl, int(args.threshold * 1000), 300, _noop)
+    cv2.createTrackbar("thresh_map(x1000)", ctrl, 50, 200, _noop)
+    cv2.createTrackbar("thresh_pts(x1000)", ctrl, 50, 200, _noop)
     cv2.createTrackbar("thresh_ang(x100)", ctrl, 50, 100, _noop)
     cv2.createTrackbar("sigma", ctrl, 3, 10, _noop)
 
@@ -254,9 +254,9 @@ def main():
         # ── Auto-tune 적용 ────────────────────────────────────────────────
         if state.auto_threshold is not None:
             t = state.auto_threshold
-            cv2.setTrackbarPos("threshold(x1000)", ctrl, max(0, min(100, int(t * 1000))))
-            cv2.setTrackbarPos("thresh_map(x1000)", ctrl, max(0, min(50, int(t * 500))))
-            cv2.setTrackbarPos("thresh_pts(x1000)", ctrl, max(0, min(50, int(t * 500))))
+            cv2.setTrackbarPos("threshold(x1000)", ctrl, max(0, min(300, int(t * 1000))))
+            cv2.setTrackbarPos("thresh_map(x1000)", ctrl, max(0, min(200, int(t * 500))))
+            cv2.setTrackbarPos("thresh_pts(x1000)", ctrl, max(0, min(200, int(t * 500))))
             state.auto_threshold = None
 
         # ── 슬라이더 읽기 ─────────────────────────────────────────────────
@@ -360,48 +360,6 @@ def main():
                         if i < 8:
                             cv2.drawMarker(img_draw, (int(pt[0]), int(pt[1])),
                                            (0, 255, 0), cv2.MARKER_SQUARE, 12, 2)
-
-        # ── (3) Fallback: raw peak 4개+ → 2D yaw 추정 ────────────────────
-        if not detected:
-            above = {i: np.array([peaks[i]['x'], peaks[i]['y']], dtype=float)
-                     for i in range(9) if peaks[i]['val'] > cfg.threshold}
-
-            if len(above) >= 4:
-                for i, pt in above.items():
-                    px, py = int(pt[0]), int(pt[1])
-                    if i == 8:
-                        cv2.circle(img_draw, (px, py), 7, (0, 0, 255), -1)
-                    else:
-                        cv2.circle(img_draw, (px, py), 5, (0, 255, 0), -1)
-                        cv2.putText(img_draw, str(i), (px + 4, py - 4),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-                detected = True
-
-                # 중심 추정
-                if 8 in above:
-                    center = above[8]
-                else:
-                    corners = [above[i] for i in range(8) if i in above]
-                    center = np.mean(corners, axis=0) if corners else None
-
-                if center is not None:
-                    front = [above[i] for i in [0, 1, 2, 3] if i in above]
-                    rear  = [above[i] for i in [4, 5, 6, 7] if i in above]
-                    vec = None
-                    if front:
-                        vec = np.mean(front, axis=0) - center
-                    elif rear:
-                        vec = center - np.mean(rear, axis=0)
-                    if vec is not None and np.linalg.norm(vec) > 1:
-                        uv = vec / np.linalg.norm(vec)
-                        end = center + uv * 55
-                        cv2.arrowedLine(img_draw, tuple(center.astype(int)),
-                                        tuple(end.astype(int)),
-                                        (0, 200, 255), 2, tipLength=0.2)
-                        a2d = np.degrees(np.arctan2(uv[0], -uv[1]))
-                        cv2.putText(img_draw, f"Yaw~{a2d:.1f}deg (raw)",
-                                    (int(center[0]), int(center[1]) - 15),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
 
         # ── 상태 표시 ─────────────────────────────────────────────────────
         if not detected:

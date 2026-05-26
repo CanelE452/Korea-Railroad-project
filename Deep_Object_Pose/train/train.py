@@ -20,6 +20,7 @@ try:
 except ImportError:
     import ConfigParser as configparser
 
+import numpy as np
 import torch
 from torch.autograd import Variable
 import torch.nn.parallel

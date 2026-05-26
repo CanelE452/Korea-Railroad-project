@@ -37,8 +37,9 @@ PYTHON_EXE="${PYTHON_EXE:-$(yq paths.python_exe)}"
 # --- 인자 파싱 ---
 FINETUNE=false
 NET_PATH=""
-EXP_NAME=""
+EXP_NAME="${EXP_NAME:-}"
 TRAIN_DIR_OVERRIDE=""
+TRAIN_DIRS_OVERRIDE=""
 VAL_DIR_OVERRIDE=""
 GEO_LOSS=false
 GEO_LAMBDA=""
@@ -62,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --net_path) NET_PATH="$2"; shift 2 ;;
         --exp_name) EXP_NAME="$2"; shift 2 ;;
         --train_dir) TRAIN_DIR_OVERRIDE="$2"; shift 2 ;;
+        --train_dirs) TRAIN_DIRS_OVERRIDE="$2"; shift 2 ;;
         --val_dir) VAL_DIR_OVERRIDE="$2"; shift 2 ;;
         --geo_loss) GEO_LOSS=true; shift ;;
         --geo_lambda) GEO_LAMBDA="$2"; shift 2 ;;
@@ -88,22 +90,22 @@ TRAIN_DIR="$(yq data.train_dir)"
 OBJECT="$(yq data.object)"
 IMAGE_SIZE="$(yq model.input_size)"
 SIGMA="$(yq train.sigma)"
-WORKERS="$(yq train.workers)"
+WORKERS="${WORKERS:-$(yq train.workers)}"
 SAVE_EVERY="$(yq train.save_every)"
 LOG_INTERVAL="$(yq train.log_interval)"
-MIN_IMAGES="$(yq data.min_train_images)"
+MIN_IMAGES="${MIN_IMAGES:-$(yq data.min_train_images)}"
 
 if $FINETUNE; then
     OUTPUT_DIR="$(yq train.finetune.output_dir)"
-    EPOCHS="$(yq train.finetune.epochs)"
-    LR="$(yq train.finetune.learning_rate)"
+    EPOCHS="${EPOCHS:-$(yq train.finetune.epochs)}"
+    LR="${LR:-$(yq train.finetune.learning_rate)}"
     if [ -z "$NET_PATH" ]; then
         NET_PATH="$(yq train.finetune.pretrained_weights)"
     fi
 else
     OUTPUT_DIR="$(yq train.pretrain.output_dir)"
-    EPOCHS="$(yq train.pretrain.epochs)"
-    LR="$(yq train.pretrain.learning_rate)"
+    EPOCHS="${EPOCHS:-$(yq train.pretrain.epochs)}"
+    LR="${LR:-$(yq train.pretrain.learning_rate)}"
 fi
 
 # --- CLI 오버라이드 적용 ---
@@ -117,9 +119,21 @@ if [ -n "$EXP_NAME" ]; then
     OUTPUT_DIR="weights/$EXP_NAME"
 fi
 
-# 데이터 확인
-TRAIN_COUNT=$(ls "$TRAIN_DIR"/*.png 2>/dev/null | wc -l)
-echo "Train images: $TRAIN_COUNT"
+# 멀티 디렉토리: --train_dirs "dir1 dir2 dir3" 가 있으면 우선
+# 없으면 단일 TRAIN_DIR 만 사용. CleanVisiiDopeLoader 가 path 리스트 + 재귀 탐색 지원.
+if [ -n "$TRAIN_DIRS_OVERRIDE" ]; then
+    TRAIN_DIRS="$TRAIN_DIRS_OVERRIDE"
+else
+    TRAIN_DIRS="$TRAIN_DIR"
+fi
+
+# 데이터 확인 (멀티 dir 합산, 재귀 탐색)
+TRAIN_COUNT=0
+for d in $TRAIN_DIRS; do
+    n=$(find "$d" -name '*.png' 2>/dev/null | wc -l)
+    TRAIN_COUNT=$((TRAIN_COUNT + n))
+done
+echo "Train images: $TRAIN_COUNT (across $(echo $TRAIN_DIRS | wc -w) dir(s))"
 if [ "$TRAIN_COUNT" -lt "$MIN_IMAGES" ]; then
     echo "[ERROR] Too few training images ($TRAIN_COUNT < $MIN_IMAGES). Run generate_all.sh first."
     exit 1
@@ -138,22 +152,28 @@ else
     echo " DOPE Training (from scratch)"
     echo "============================================"
 fi
+BATCH_SIZE="${BATCH:-$(if $FINETUNE; then yq train.finetune.batch_size; else yq train.pretrain.batch_size; fi)}"
+
 echo " Config:     ../../$CONFIG"
-echo " Data:       ../../$TRAIN_DIR ($TRAIN_COUNT images)"
+echo " Data:       $TRAIN_DIRS ($TRAIN_COUNT images)"
 echo " Output:     ../../$OUTPUT_DIR"
 echo " Object:     $OBJECT"
 echo " Epochs:     $EPOCHS"
-echo " Batch size: $(if $FINETUNE; then yq train.finetune.batch_size; else yq train.pretrain.batch_size; fi)"
+echo " Batch size: $BATCH_SIZE"
 echo " LR:         $LR"
 echo " Image size: $IMAGE_SIZE"
 echo " Sigma:      $SIGMA"
 echo " Workers:    $WORKERS"
 echo "============================================"
 
-BATCH_SIZE=$(if $FINETUNE; then yq train.finetune.batch_size; else yq train.pretrain.batch_size; fi)
+# --data 부분을 멀티 dir 로 펼침 (각각 ../../ 접두)
+DATA_ARGS=""
+for d in $TRAIN_DIRS; do
+    DATA_ARGS="$DATA_ARGS \"../../$d\""
+done
 
 TRAIN_CMD="\"$PYTHON_EXE\" train.py \
-    --data \"../../$TRAIN_DIR\" \
+    --data $DATA_ARGS \
     --object $OBJECT \
     --epochs $EPOCHS \
     --batchsize $BATCH_SIZE \
