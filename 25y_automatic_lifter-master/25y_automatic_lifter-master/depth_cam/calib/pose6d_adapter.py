@@ -73,8 +73,14 @@ def pose6d_to_align_vars(R, t, anchor: str = "entry_face") -> Tuple[float, float
     Rm = _to_3x3(R)
     tx, _, tz = _to_3vec(t)
 
+    # ψ_pallet — 카메라가 팔레트 정면을 바라볼 때 두 +Z 축이 마주봄 → atan2 가
+    # ±180° 를 반환. align.py 의 YAW_TOL_DEG=2° (정렬 완료 시 ψ≈0° 기대) 와
+    # 컨벤션이 어긋나므로 180° offset 을 흡수해 정렬 완료를 0° 로 정의.
+    # 2026-05-27 실차 디버깅에서 ψ=-165.6°/+178.2° 측정 → fsm 이 -165° 회전
+    # cmd 보내서 리프터 거의 안 움직임. wrap_to_180(psi + 180) 으로 fix.
     psi_rad = math.atan2(Rm[0][2], Rm[2][2])
-    psi_deg = math.degrees(psi_rad)
+    psi_deg = math.degrees(psi_rad) + 180.0
+    psi_deg = ((psi_deg + 180.0) % 360.0) - 180.0   # wrap to [-180, 180]
 
     if anchor == "entry_face":
         # entry face = centroid + R @ (0, 0, +depth/2)
