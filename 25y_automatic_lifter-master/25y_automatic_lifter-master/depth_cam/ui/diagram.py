@@ -249,11 +249,12 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
     ALIGN_CHECKS       = ["YAW_CHECK", "OFFSET_CHECK", "DIST_CHECK", "READY_TO_DONE"]
     ALIGN_YAW_CORRECT  = ["YAW_CORRECT_RIGHT", "YAW_CORRECT_LEFT"]
     ALIGN_DIST_ADJUST  = ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"]
+    ALIGN_NEED_CORRECT = ["OFFSET_NEED_CORRECT"]   # DIST_CHECK 의 |d_lat|>tol 분기 (mermaid 시각화용)
     ALIGN_RIGHT_BRANCH = ["LATERAL_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT", "LATERAL_ROTATE_LEFT_BACK"]
     ALIGN_LEFT_BRANCH  = ["LATERAL_ROTATE_LEFT",  "FORWARD_AFTER_LEFT",  "LATERAL_ROTATE_RIGHT_BACK"]
 
     align_nodes = (ALIGN_CHECKS + ALIGN_YAW_CORRECT + ALIGN_DIST_ADJUST
-                   + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH)
+                   + ALIGN_NEED_CORRECT + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH)
 
     # 활성 플래그
     top = getattr(fsm, "state", "SEARCH")
@@ -279,12 +280,14 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
         # OFFSET_CHECK → DIST_CHECK
         ("OFFSET_CHECK", "DIST_CHECK"),
 
-        # DIST_CHECK → 4 branches
+        # DIST_CHECK → 4 branches (mermaid: |d_lat|>tol 면 OFFSET_NEED_CORRECT 거쳐서 LATERAL)
         ("DIST_CHECK", "ALIGN_FWD_ADJUST"),
         ("DIST_CHECK", "ALIGN_BWD_ADJUST"),
-        ("DIST_CHECK", "LATERAL_ROTATE_RIGHT"),   # OFFSET_NEED_CORRECT (right)
-        ("DIST_CHECK", "LATERAL_ROTATE_LEFT"),    # OFFSET_NEED_CORRECT (left)
+        ("DIST_CHECK", "OFFSET_NEED_CORRECT"),
         ("DIST_CHECK", "YAW_CHECK"),
+        # OFFSET_NEED_CORRECT → LATERAL chain 좌/우 분기
+        ("OFFSET_NEED_CORRECT", "LATERAL_ROTATE_RIGHT"),
+        ("OFFSET_NEED_CORRECT", "LATERAL_ROTATE_LEFT"),
 
         # ALIGN_*_ADJUST → DIST_CHECK 복귀
         ("ALIGN_FWD_ADJUST", "DIST_CHECK"),
@@ -322,6 +325,7 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
         ["OFFSET_CHECK"],
         ["DIST_CHECK"],
         ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"],
+        ["OFFSET_NEED_CORRECT"],
         ["LATERAL_ROTATE_RIGHT", "LATERAL_ROTATE_LEFT"],
         ["FORWARD_AFTER_RIGHT", "FORWARD_AFTER_LEFT"],
         ["LATERAL_ROTATE_LEFT_BACK", "LATERAL_ROTATE_RIGHT_BACK"],
