@@ -107,6 +107,30 @@ FOV check
 - Reproj accept px: detection accept 임계값
 - d_lat tol, psi tol: 정렬 종료 조건
 
+DOPE-style psi 검증 (실차 시뮬)
+- Detection Model 패널의 "Use DOPE-converted psi for FSM" 토글로 활성화.
+- 이 모드에서는 depth_cam/calib/pose6d_adapter.py 의 변환식을 시뮬에 그대로
+  reproduce 한 ψ/d_lat/d_fwd 가 FSM 입력 (snapshot) 으로 들어간다.
+- 변환 단계:
+    1) world 의 (forklift, camera, pallet) 으로부터 가상 3D pose 생성.
+       camera frame: OpenCV (+X right, +Y down, +Z forward = 광축).
+       pallet model: v4 (+X width, +Y height, +Z entry-face forward).
+    2) R_cam_pallet = R_world_camera^T · R_world_pallet,
+       t_cam_pallet = R_world_camera^T · (t_world_pallet − t_world_camera).
+    3) ψ = wrap_to_180( atan2(R[0,2], R[2,2]) ° + 180 ).
+    4) entry-face anchor: d_lat = t[0] + R[0,2]·depth/2,
+                          d_fwd = t[2] + R[2,2]·depth/2.
+- HUD 의 State Variables 에 "psi (geometric)" 과 "psi (DOPE-style)" 가 매 frame
+  같이 표시됨. 부호 일치 / 반전 여부를 시각으로 비교 가능.
+- 검증 결과 (현재 코드): 두 ψ 가 모든 자세에서 정확히 일치.
+    pallet yaw=+5°  → 두 ψ 모두 −5°  → ψ>0 케이스 아님
+    pallet yaw=−5°  → 두 ψ 모두 +5°  → ROT_RIGHT (yaw 감소) → ψ→0 ✓
+    fork yaw=+95°   → 두 ψ 모두 +5°  → ROT_RIGHT → ψ→0 ✓
+    fork yaw=+85°   → 두 ψ 모두 −5°  → ROT_LEFT  → ψ→0 ✓
+  align.py 분기 (yaw>0 → ROT_RIGHT, yaw<0 → ROT_LEFT) 와 부호 일치.
+- 결론: pose6d_adapter.py 의 `+180° shift + wrap` fix 는 옳음. 시뮬에서도
+  같은 변환을 거쳐야 정렬 완료 = 0° convention 이 성립.
+
 포함 파일
 - index.html
 - styles.css

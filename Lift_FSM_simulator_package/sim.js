@@ -126,7 +126,10 @@ const sim = {
   pose: null,
   canvas: null,
   ctx: null,
-  lastTime: performance.now()
+  lastTime: performance.now(),
+  // DOPE-style ψ (pose6d_adapter.py reproduction). UI toggle 로 FSM 입력 선택.
+  dopeFsm: false,
+  dopePose: null   // { psi, dLat, dFwd, R, t }
 };
 
 let normalSpare = null;
@@ -144,10 +147,16 @@ function bindElements() {
     "detNoiseToggle", "detYawStd", "detXStd", "detForwardStd",
     "reprojAccept", "resampleDetectBtn", "latTol", "psiTol",
     "jsonDropZone", "jsonFileInput", "jsonStatus",
-    "fsmList", "logBox"
+    "fsmList", "logBox", "fsmDiagramCanvas",
+    "useDopePsiToggle", "psiGeometric", "psiDope",
+    "dopeDLat", "dopeDFwd"
   ].forEach((id) => { el[id] = $(id); });
   sim.canvas = el.simCanvas;
   sim.ctx = sim.canvas.getContext("2d");
+  if (el.fsmDiagramCanvas) {
+    sim.diagramCanvas = el.fsmDiagramCanvas;
+    sim.diagramCtx = sim.diagramCanvas.getContext("2d");
+  }
 }
 
 function syncInputsFromState() {
@@ -230,6 +239,15 @@ function wireEvents() {
     computePose();
     draw();
   });
+
+  if (el.useDopePsiToggle) {
+    el.useDopePsiToggle.addEventListener("change", () => {
+      sim.dopeFsm = el.useDopePsiToggle.checked;
+      log(`DOPE-converted psi FSM input: ${sim.dopeFsm ? "ON" : "OFF"}`);
+      computePose();
+      draw();
+    });
+  }
 
   el.runBtn.addEventListener("click", () => {
     sim.running = !sim.running;
@@ -529,7 +547,116 @@ function computePose() {
     t, n, c, f, pPoint, foot, dForward, dLateral, psiPallet, psiLateral,
     psiBodyAxis, targetPalletYaw, targetLateralYaw
   };
+  // DOPE-style 6D pose pipeline (pose6d_adapter.py reproduction).
+  sim.dopePose = dopeStylePsi();
   return sim.pose;
+}
+
+// ===========================================================================
+// Virtual 6D pose pipeline (DOPE-style ψ).
+//
+// 목적: 시뮬에서 depth_cam/calib/pose6d_adapter.py 의 ψ 변환 식을 실차와
+// 동일하게 재현하여, FSM (align.py) 의 좌/우 회전 분기가 ψ 부호와 일치하는지
+// 시각적으로 검증.
+//
+// 좌표계:
+//   world: +x = canvas right, +y = canvas up, +z = up (시뮬 2D 에 가상의 z).
+//   pallet model (v4): +X right(width), +Y up(height), +Z forward(entry face).
+//   camera (OpenCV): +X right, +Y down, +Z forward (광축 = forklift heading).
+// ===========================================================================
+
+function matMul3(A, B) {
+  const C = [[0,0,0],[0,0,0],[0,0,0]];
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += A[i][k] * B[k][j];
+      C[i][j] = s;
+    }
+  return C;
+}
+
+function matT3(A) {
+  return [
+    [A[0][0], A[1][0], A[2][0]],
+    [A[0][1], A[1][1], A[2][1]],
+    [A[0][2], A[1][2], A[2][2]],
+  ];
+}
+
+function matVec3(A, v) {
+  return [
+    A[0][0]*v[0] + A[0][1]*v[1] + A[0][2]*v[2],
+    A[1][0]*v[0] + A[1][1]*v[1] + A[1][2]*v[2],
+    A[2][0]*v[0] + A[2][1]*v[1] + A[2][2]*v[2],
+  ];
+}
+
+// camera world pose. forklift heading 방향으로 +Z(광축), world -Z 가 카메라 +Y(down).
+//   forward = (cos(yaw), sin(yaw), 0)
+//   right   = (sin(yaw), -cos(yaw), 0)   // forward 의 시계방향 90°
+//   down    = (0, 0, -1)
+// R_world_camera = [right | down | forward] (컬럼).
+function cameraWorldPose() {
+  const yaw = sim.fork.yaw;
+  const c = Math.cos(yaw * DEG);
+  const s = Math.sin(yaw * DEG);
+  const R_wc = [
+    [ s,  0,  c],
+    [-c,  0,  s],
+    [ 0, -1,  0],
+  ];
+  const cam = cameraPosition();
+  const t_wc = [cam.x, cam.y, sim.camera.mountHeight];
+  return { R: R_wc, t: t_wc };
+}
+
+// pallet world pose. pallet model +Z = palletNormal (entry face 방향, forklift 쪽).
+//   +X (width)  = palletTangent
+//   +Y (height) = world +z
+//   +Z (depth)  = palletNormal
+// R_world_pallet = [tangent | up | normal] (컬럼).
+// t_world_pallet = (pallet.x, pallet.y, height/2).
+function palletWorldPose() {
+  const detectedPallet = controlPallet();
+  const tan = palletTangent(detectedPallet);
+  const nor = palletNormal(detectedPallet);
+  const R_wp = [
+    [tan.x, 0, nor.x],
+    [tan.y, 0, nor.y],
+    [0,     1, 0    ],
+  ];
+  const t_wp = [detectedPallet.x, detectedPallet.y, detectedPallet.height / 2];
+  return { R: R_wp, t: t_wp };
+}
+
+// pallet pose in camera frame: R_cp = R_wc^T · R_wp, t_cp = R_wc^T · (t_wp - t_wc).
+function palletInCameraFrame() {
+  const { R: Rwc, t: twc } = cameraWorldPose();
+  const { R: Rwp, t: twp } = palletWorldPose();
+  const Rcw = matT3(Rwc);
+  const Rcp = matMul3(Rcw, Rwp);
+  const dt = [twp[0]-twc[0], twp[1]-twc[1], twp[2]-twc[2]];
+  const tcp = matVec3(Rcw, dt);
+  return { R: Rcp, t: tcp };
+}
+
+// pose6d_adapter.pose6d_to_align_vars 와 동일 식:
+//   psi_rad = atan2(R[0][2], R[2][2])
+//   psi_deg = degrees(psi_rad) + 180.0
+//   psi_deg = wrap_to_180(psi_deg)
+//   anchor = entry_face → (tx + R[0][2]*depth/2, tz + R[2][2]*depth/2)
+function dopeStylePsi() {
+  const { R, t } = palletInCameraFrame();
+  let psi_deg = Math.atan2(R[0][2], R[2][2]) * RAD;
+  psi_deg += 180.0;
+  psi_deg = ((psi_deg + 180.0) % 360.0) - 180.0;
+  if (psi_deg === -180.0) psi_deg = 180.0;
+  const pallet = controlPallet();
+  const offset = pallet.depth / 2.0;
+  const d_lat = t[0] + R[0][2] * offset;
+  const d_fwd = t[2] + R[2][2] * offset;
+  return { psi: psi_deg, dLat: d_lat, dFwd: d_fwd, R, t };
 }
 
 function update(dt) {
@@ -641,10 +768,20 @@ function refreshPerceptionForSnapshot() {
 function takeSnapshot() {
   refreshPerceptionForSnapshot();
   const p = sim.pose;
+  // dopeFsm 토글 ON 이면 pose6d_adapter.py 변환 결과로 FSM 입력 대체.
+  // 실차 ψ 부호 / d_lat 부호 일치 시각 검증용.
+  let psi = p.psiPallet;
+  let dLat = p.dLateral;
+  let dFwd = p.dForward;
+  if (sim.dopeFsm && sim.dopePose) {
+    psi = sim.dopePose.psi;
+    dLat = sim.dopePose.dLat;
+    dFwd = sim.dopePose.dFwd;
+  }
   sim.fsm.snapshot = {
-    psi: p.psiPallet,
-    dLateral: p.dLateral,
-    dForward: p.dForward,
+    psi,
+    dLateral: dLat,
+    dForward: dFwd,
     ts: performance.now() / 1000
   };
   return sim.fsm.snapshot;
@@ -991,6 +1128,10 @@ function renderUi() {
   el.dForward.textContent = `${p.dForward.toFixed(3)} m`;
   el.dLateral.textContent = `${p.dLateral.toFixed(3)} m`;
   el.psiPallet.textContent = `${p.psiPallet.toFixed(2)} deg`;
+  if (el.psiGeometric) el.psiGeometric.textContent = `${p.psiPallet.toFixed(2)} deg`;
+  if (el.psiDope && sim.dopePose) el.psiDope.textContent = `${sim.dopePose.psi.toFixed(2)} deg`;
+  if (el.dopeDLat && sim.dopePose) el.dopeDLat.textContent = `${sim.dopePose.dLat.toFixed(3)} m`;
+  if (el.dopeDFwd && sim.dopePose) el.dopeDFwd.textContent = `${sim.dopePose.dFwd.toFixed(3)} m`;
   const detTag = sim.detection.source === "json" ? "JSON" : "noise";
   const acceptTag = sim.detection.accepted ? "OK" : (sim.detection.inFov ? "REJ" : "FOV");
   el.detReadout.textContent = `${detTag}/${acceptTag} yaw ${sim.detection.yawError.toFixed(2)} / x ${sim.detection.xOffsetError.toFixed(3)} / fwd ${sim.detection.forwardError.toFixed(3)} / reproj ${sim.detection.reprojError.toFixed(2)} px`;
@@ -1015,6 +1156,252 @@ function draw() {
   drawForklift(ctx);
   drawLegend(ctx);
   renderUi();
+  drawFsmDiagram();
+}
+
+// ============================================================================
+// FSM diagram (25y_automatic_lifter/depth_cam/ui/diagram.py 의 JS 포팅).
+// OUTER (SEARCH/ALIGN/INSERT/DONE) + ALIGN sub (snapshot 모델) 두 칼럼.
+// 시뮬 state 를 diagram node 에 매핑하여 active 표시.
+// ============================================================================
+
+const FSM_OUTER_NODES = ["SEARCH", "ALIGN", "INSERT", "DONE"];
+
+// ALIGN 칼럼 레벨별 노드. diagram.py 의 align_levels_ordered 와 동일 순서.
+// INSERT 는 OUTER 에만 두고 ALIGN 칼럼에서는 제거 (POS key 중복 방지).
+const FSM_ALIGN_LEVELS = [
+  ["YAW_CHECK"],
+  ["YAW_CORRECT_RIGHT", "YAW_CORRECT_LEFT"],
+  ["OFFSET_CHECK"],
+  ["DIST_CHECK"],
+  ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"],
+  ["LATERAL_ROTATE_RIGHT", "LATERAL_ROTATE_LEFT"],
+  ["FORWARD_AFTER_RIGHT", "FORWARD_AFTER_LEFT"],
+  ["LATERAL_ROTATE_LEFT_BACK", "LATERAL_ROTATE_RIGHT_BACK"],
+  ["READY_TO_DONE"]
+];
+
+// 노드 박스 안에 표시할 짧은 라벨 (긴 이름은 abbreviation).
+const FSM_NODE_LABEL = {
+  "YAW_CORRECT_RIGHT": "YAW_CORR_R",
+  "YAW_CORRECT_LEFT":  "YAW_CORR_L",
+  "ALIGN_FWD_ADJUST":  "FWD_ADJ",
+  "ALIGN_BWD_ADJUST":  "BWD_ADJ",
+  "LATERAL_ROTATE_RIGHT":      "LAT_ROT_R",
+  "LATERAL_ROTATE_LEFT":       "LAT_ROT_L",
+  "FORWARD_AFTER_RIGHT":       "FWD_AFT_R",
+  "FORWARD_AFTER_LEFT":        "FWD_AFT_L",
+  "LATERAL_ROTATE_LEFT_BACK":  "LAT_ROT_L_B",
+  "LATERAL_ROTATE_RIGHT_BACK": "LAT_ROT_R_B"
+};
+
+const FSM_EDGES = [
+  // OUTER
+  ["SEARCH", "ALIGN"], ["ALIGN", "INSERT"], ["INSERT", "DONE"],
+  // ALIGN 진입
+  ["ALIGN", "YAW_CHECK"],
+  // YAW_CHECK → 3 branches
+  ["YAW_CHECK", "YAW_CORRECT_RIGHT"], ["YAW_CHECK", "YAW_CORRECT_LEFT"], ["YAW_CHECK", "READY_TO_DONE"],
+  // YAW_CORRECT → OFFSET_CHECK
+  ["YAW_CORRECT_RIGHT", "OFFSET_CHECK"], ["YAW_CORRECT_LEFT", "OFFSET_CHECK"],
+  // OFFSET_CHECK → DIST_CHECK
+  ["OFFSET_CHECK", "DIST_CHECK"],
+  // DIST_CHECK → 4 branches + loop
+  ["DIST_CHECK", "ALIGN_FWD_ADJUST"], ["DIST_CHECK", "ALIGN_BWD_ADJUST"],
+  ["DIST_CHECK", "LATERAL_ROTATE_RIGHT"], ["DIST_CHECK", "LATERAL_ROTATE_LEFT"],
+  ["DIST_CHECK", "YAW_CHECK"],
+  // ALIGN_*_ADJUST → DIST_CHECK
+  ["ALIGN_FWD_ADJUST", "DIST_CHECK"], ["ALIGN_BWD_ADJUST", "DIST_CHECK"],
+  // LATERAL chain (우/좌)
+  ["LATERAL_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT"],
+  ["FORWARD_AFTER_RIGHT", "LATERAL_ROTATE_LEFT_BACK"],
+  ["LATERAL_ROTATE_LEFT_BACK", "YAW_CHECK"],
+  ["LATERAL_ROTATE_LEFT", "FORWARD_AFTER_LEFT"],
+  ["FORWARD_AFTER_LEFT", "LATERAL_ROTATE_RIGHT_BACK"],
+  ["LATERAL_ROTATE_RIGHT_BACK", "YAW_CHECK"],
+  // READY_TO_DONE → top INSERT
+  ["READY_TO_DONE", "INSERT"]
+];
+
+// 시뮬 state → (outer, alignSub) 매핑.
+function mapSimStateToDiagram() {
+  let state = sim.fsm.state;
+  if (state === "STOP_INTERLOCK") state = sim.fsm.nextState || state;
+  // READY_TO_INSERT 는 align.py 의 READY_TO_DONE 에 해당.
+  const alignSubMap = {
+    "READY_TO_INSERT": "READY_TO_DONE"
+  };
+  if (state === "START" || state === "SEARCH") return { outer: "SEARCH", sub: null };
+  if (state === "DONE") return { outer: "DONE", sub: null };
+  if (state === "READY_TO_INSERT") return { outer: "INSERT", sub: "READY_TO_DONE" };
+  if (state === "INSERT") return { outer: "INSERT", sub: null };
+  // 모든 ALIGN sub
+  return { outer: "ALIGN", sub: (alignSubMap[state] || state) };
+}
+
+function drawFsmDiagram() {
+  const canvas = sim.diagramCanvas;
+  if (!canvas) return;
+  const ctx = sim.diagramCtx;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(320, Math.floor(rect.width * dpr));
+  const H = Math.max(420, Math.floor(rect.height * dpr));
+  if (canvas.width !== W || canvas.height !== H) {
+    canvas.width = W;
+    canvas.height = H;
+  }
+
+  // 스타일 (diagram.py 와 비슷)
+  const PANEL_BG = "#191919";
+  const GROUP_BG = "#232323";
+  const GROUP_BORDER = "#464646";
+  const GROUP_ACTIVE = "#3cc8ff";
+  const TEXT_DIM = "#a5a5a5";
+  const TEXT_NORM = "#e6e6e6";
+  const TEXT_TITLE = "#d2d2d2";
+  const NODE_FILL = "#2a2a2a";
+  const NODE_FILL_DIM = "#3c3c3c";
+  const NODE_BORDER = "#5f5f5f";
+  const EDGE_COLOR = "#6e6e6e";
+
+  ctx.fillStyle = PANEL_BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // 타이틀 + 현재 상태
+  const sFont = `${Math.round(13 * dpr)}px Arial`;
+  ctx.fillStyle = TEXT_TITLE;
+  ctx.font = `bold ${Math.round(15 * dpr)}px Arial`;
+  ctx.textAlign = "center";
+  ctx.fillText("Calibration FSM (Snapshot Model)", W / 2, 22 * dpr);
+
+  // 레이아웃 상수 (canvas 폭에 맞춰 노드 크기 적응)
+  const PAD = 12 * dpr;
+  const TITLE_H = 36 * dpr;
+  const GROUP_PAD = 10 * dpr;
+  const COL_GAP = 12 * dpr;
+  const ROW_GAP = 10 * dpr;
+  const LEVEL_GAP = 14 * dpr;
+  const outerW = (W - 2 * PAD - COL_GAP) * 0.28;
+  const alignW = (W - 2 * PAD - COL_GAP) - outerW;
+  const xOuter = PAD;
+  const xAlign = xOuter + outerW + COL_GAP;
+  const topY = TITLE_H;
+  // 노드 크기: ALIGN 칼럼 최대 2열에 맞춤
+  const alignInnerW = alignW - 2 * GROUP_PAD;
+  const nodeW = Math.min(160 * dpr, (alignInnerW - COL_GAP) / 2);
+  const nodeH = 26 * dpr;
+  const outerInnerW = outerW - 2 * GROUP_PAD;
+  const outerNodeW = Math.min(nodeW, outerInnerW);
+
+  // ALIGN sub 레이아웃
+  const POS = {};
+  const startY = topY + GROUP_PAD + 22 * dpr;
+  // OUTER
+  let yo = startY;
+  for (const name of FSM_OUTER_NODES) {
+    const x = xOuter + GROUP_PAD + (outerInnerW - outerNodeW) / 2;
+    POS[name] = { x, y: yo, w: outerNodeW, h: nodeH };
+    yo += nodeH + LEVEL_GAP;
+  }
+  // ALIGN
+  let ya = startY;
+  for (const level of FSM_ALIGN_LEVELS) {
+    const cols = level.length;
+    const totalW = cols * nodeW + (cols - 1) * COL_GAP;
+    const sx = xAlign + GROUP_PAD + Math.max(0, (alignInnerW - totalW) / 2);
+    for (let i = 0; i < cols; i++) {
+      const name = level[i];
+      POS[name] = { x: sx + i * (nodeW + COL_GAP), y: ya, w: nodeW, h: nodeH };
+    }
+    ya += nodeH + LEVEL_GAP;
+  }
+  const gyEnd = Math.max(yo, ya) + GROUP_PAD;
+
+  // active 매핑
+  const dm = mapSimStateToDiagram();
+  const activeOuter = dm.outer;
+  const activeSub = dm.sub;
+  const inAlignGroup = (activeOuter === "ALIGN" || activeOuter === "INSERT");
+
+  // 그룹 박스
+  const drawGroup = (gx, gw, title, active) => {
+    ctx.fillStyle = GROUP_BG;
+    ctx.fillRect(gx, topY, gw, gyEnd - topY);
+    ctx.strokeStyle = active ? GROUP_ACTIVE : GROUP_BORDER;
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeRect(gx, topY, gw, gyEnd - topY);
+    ctx.fillStyle = TEXT_TITLE;
+    ctx.font = `bold ${Math.round(13 * dpr)}px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText(title, gx + gw / 2, topY + 16 * dpr);
+  };
+  drawGroup(xOuter, outerW, "OUTER", true);
+  drawGroup(xAlign, alignW, "ALIGN", inAlignGroup);
+
+  // 엣지
+  ctx.strokeStyle = EDGE_COLOR;
+  ctx.lineWidth = 1 * dpr;
+  ctx.fillStyle = EDGE_COLOR;
+  const center = (n) => POS[n] && { x: POS[n].x + POS[n].w / 2, y: POS[n].y + POS[n].h / 2 };
+  for (const [u, v] of FSM_EDGES) {
+    const a = center(u), b = center(v);
+    if (!a || !b) continue;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    // 화살표 머리
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const head = 6 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x - head * Math.cos(ang - 0.4), b.y - head * Math.sin(ang - 0.4));
+    ctx.lineTo(b.x - head * Math.cos(ang + 0.4), b.y - head * Math.sin(ang + 0.4));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 노드 (엣지 위에 덮어 그리기). 라벨이 박스 폭을 넘으면 폰트 자동 축소.
+  const drawNode = (name, p, active, dim) => {
+    ctx.fillStyle = dim ? NODE_FILL_DIM : NODE_FILL;
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.strokeStyle = active ? GROUP_ACTIVE : NODE_BORDER;
+    ctx.lineWidth = active ? (2.5 * dpr) : (1.5 * dpr);
+    ctx.strokeRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = active ? TEXT_NORM : (dim ? TEXT_DIM : TEXT_NORM);
+    const label = FSM_NODE_LABEL[name] || name;
+    let fontPx = 11;
+    ctx.font = `${active ? "bold " : ""}${Math.round(fontPx * dpr)}px Arial`;
+    const maxTextW = p.w - 8 * dpr;
+    while (ctx.measureText(label).width > maxTextW && fontPx > 7) {
+      fontPx -= 1;
+      ctx.font = `${active ? "bold " : ""}${Math.round(fontPx * dpr)}px Arial`;
+    }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, p.x + p.w / 2, p.y + p.h / 2 + 1 * dpr);
+    ctx.textBaseline = "alphabetic";
+  };
+  for (const name of FSM_OUTER_NODES) {
+    drawNode(name, POS[name], name === activeOuter, false);
+  }
+  for (const level of FSM_ALIGN_LEVELS) {
+    for (const name of level) {
+      const active = inAlignGroup && (name === activeSub);
+      const dim = !inAlignGroup;
+      drawNode(name, POS[name], active, dim);
+    }
+  }
+
+  // 하단 상태 표시
+  ctx.fillStyle = "#e1e1e1";
+  ctx.font = `${Math.round(11 * dpr)}px Arial`;
+  ctx.textAlign = "left";
+  let statusLine = `state: ${sim.fsm.state}`;
+  if (sim.fsm.state === "STOP_INTERLOCK") statusLine += ` (next: ${sim.fsm.nextState || "?"})`;
+  if (inAlignGroup && activeSub) statusLine += `  •  align.sub: ${activeSub}`;
+  ctx.fillText(statusLine, 14 * dpr, H - 10 * dpr);
 }
 
 function resizeCanvas() {
