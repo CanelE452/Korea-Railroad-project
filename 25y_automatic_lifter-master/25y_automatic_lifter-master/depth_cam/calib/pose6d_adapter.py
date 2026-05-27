@@ -135,23 +135,39 @@ def keypoints9_to_align_vars(
 
     # invisible keypoint 제거
     visible = ~np.isnan(kps).any(axis=1) & (kps[:, 0] >= 0) & (kps[:, 1] >= 0)
-    if visible.sum() < 4:
+    n_vis = int(visible.sum())
+    if n_vis < 4:
         return None
 
-    obj_pts = object_points[visible].reshape(-1, 1, 3)
-    img_pts = kps[visible].reshape(-1, 1, 2)
+    obj_pts = object_points[visible].reshape(-1, 1, 3).astype(np.float64)
+    img_pts = kps[visible].reshape(-1, 1, 2).astype(np.float64)
     K = np.asarray(camera_matrix, dtype=np.float64).reshape(3, 3)
-    D = np.zeros(5, dtype=np.float64) if dist_coeffs is None else np.asarray(dist_coeffs, dtype=np.float64).ravel()
+    # OpenCV solvePnP 는 dist_coeffs 가 2D (N,1) 또는 (1,N) 여야 함. 1D 면 m.dims>=2 assert fail.
+    if dist_coeffs is None:
+        D = np.zeros((5, 1), dtype=np.float64)
+    else:
+        D = np.asarray(dist_coeffs, dtype=np.float64).reshape(-1, 1)
 
-    flag = cv2.SOLVEPNP_EPNP if visible.sum() >= 6 else cv2.SOLVEPNP_ITERATIVE
-    ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, D, flags=flag)
+    # EPnP: >=6 points 권장. SQPNP: 4+ points 지원 (OpenCV 4.5+). ITERATIVE: 초기값 필요 → skip.
+    if n_vis >= 6:
+        flag = cv2.SOLVEPNP_EPNP
+    else:
+        # 4~5 points: SQPNP 가 안정적. 없으면 fallback.
+        flag = getattr(cv2, "SOLVEPNP_SQPNP", cv2.SOLVEPNP_EPNP)
+
+    try:
+        ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, D, flags=flag)
+    except cv2.error:
+        # 4-5 points 에서 어떤 flag 든 fail 할 수 있음 — silent skip.
+        return None
     if not ok:
         return None
-    # iterative refine
-    try:
-        rvec, tvec = cv2.solvePnPRefineLM(obj_pts, img_pts, K, D, rvec, tvec)
-    except Exception:
-        pass
+    # iterative refine (>=6 일 때만; 미만이면 over-fit 가능)
+    if n_vis >= 6:
+        try:
+            rvec, tvec = cv2.solvePnPRefineLM(obj_pts, img_pts, K, D, rvec, tvec)
+        except cv2.error:
+            pass
 
     R, _ = cv2.Rodrigues(rvec)
     return pose6d_to_align_vars(R, tvec.ravel())

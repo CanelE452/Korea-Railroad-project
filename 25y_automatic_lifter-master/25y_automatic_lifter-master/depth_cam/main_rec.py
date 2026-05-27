@@ -316,7 +316,11 @@ def main():
                     print(f"[DopePose] infer_keypoints9 error: {e}")
                     kps9 = None
                 if kps9 is not None:
-                    result6d = keypoints9_to_align_vars(kps9, camera_matrix, dist_coeffs=None)
+                    try:
+                        result6d = keypoints9_to_align_vars(kps9, camera_matrix, dist_coeffs=None)
+                    except Exception as e:
+                        print(f"[Pose6D] keypoints9_to_align_vars error: {e}")
+                        result6d = None
                     if result6d is not None:
                         psi_pallet_deg, d_lateral_m, d_forward_m = result6d
 
