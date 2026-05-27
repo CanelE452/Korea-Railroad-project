@@ -15,7 +15,52 @@ from dataclasses import dataclass
 import threading
 import time
 
-from canlib import canlib, Frame  # Kvaser CANlib
+# Kvaser CANlib — DLL (canlib32.dll) 부재 시 자동 mock fallback.
+# Kvaser SDK 가 설치된 머신 (사용자 운영 환경) 에서는 정상 import.
+# SDK 없는 개발 머신 (CI / 검증용) 에서는 mock 으로 떨어져 main_rec.py 의
+# import 단계까지 통과시킴 (실제 CAN 송수신은 [MOCK SEND] 로 대체).
+try:
+    from canlib import canlib, Frame  # Kvaser CANlib
+    _CANLIB_DLL_OK = True
+except (ImportError, FileNotFoundError, OSError) as _e:
+    print(f"[CAN] canlib DLL load failed ({type(_e).__name__}: {_e}) — using mock canlib.")
+    _CANLIB_DLL_OK = False
+
+    class _MockCanlibError(Exception):
+        pass
+
+    class _MockChannel:
+        def setBusOutputControl(self, *a, **k): pass
+        def setBusParams(self, *a, **k): pass
+        def busOn(self): pass
+        def busOff(self): pass
+        def close(self): pass
+        def write(self, frame): pass
+        def read(self, *a, **k): raise _MockCanlibError("mock: no frame")
+
+    class _MockCanlib:
+        canERR_NOTFOUND = -3
+        canOPEN_ACCEPT_VIRTUAL = 0
+        canBITRATE_500K = -2
+        Driver = type("Driver", (), {"NORMAL": 4})()
+        canERR_NOMSG = _MockCanlibError
+
+        @staticmethod
+        def openChannel(channel, flags=0):
+            return _MockChannel()
+
+        @staticmethod
+        def getNumberOfChannels():
+            return 0
+
+    canlib = _MockCanlib()
+
+    class Frame:
+        def __init__(self, id_=0, data=b"", dlc=0, flags=0):
+            self.id = id_
+            self.data = data
+            self.dlc = dlc
+            self.flags = flags
 
 __all__ = [
     "can_init", "can_close", "start_heartbeat", "stop_heartbeat", "send_heartbeat",
