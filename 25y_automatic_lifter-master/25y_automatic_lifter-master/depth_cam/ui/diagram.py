@@ -211,152 +211,136 @@ def _layout_by_levels(inner_x, start_y, inner_w, levels):
         y += NODE_H + LEVEL_GAP
     return pos, y
 
-def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.26, 0.50, 0.24)):
+def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)):
     """
-    대주제: OUTER / ALIGN / RECOVER
-    - OUTER/RECOVER: 계층형(BFS) 배치
-    - ALIGN: 실제 align.py의 서브상태 이름을 그대로 사용한 명시 순서 배치
-    패널 상단 우측에 "미니 진행바"를 추가하여 현재 rel_yaw 또는 FWD 잔여시간 진행률을 표시.
+    새 다이어그램 (2026-05-27 snapshot 모델) 시각화:
+      OUTER:  SEARCH → ALIGN → INSERT → DONE
+      ALIGN:  YAW_CHECK ↔ YAW_CORRECT_R/L → OFFSET_CHECK → DIST_CHECK
+              → OFFSET_NEED_CORRECT 분기 → LATERAL_ROTATE_R/L
+              → FORWARD_AFTER_R/L → LATERAL_ROTATE_L/R_BACK → YAW_CHECK
+              → READY_TO_DONE → (top-level) INSERT → DONE
 
-    ※ 수정 사항: 우/좌 분기 체인의 종료 지점을 OFFSET_CHECK → YAW_CHECK로 변경.
+    RECOVER 그룹 제거 (새 FSM 에 없음).
     """
     H, W = panel_size
     img = np.zeros((H, W, 3), dtype=np.uint8)
     img[:] = PANEL_BG
 
     # 상단 타이틀
-    _put_center(img, "Calibration FSM (Hierarchical + ALIGN States Synced)", W//2, 22,
+    _put_center(img, "Calibration FSM (Snapshot Model)", W//2, 22,
                 (210,210,210), scale=0.70, thick=2)
 
     # ===== 상단 우측: 미니 진행바 =====
     cmd_status = getattr(fsm, "cmd_status", None)
     ratio, cap = _progress_from_cmdstatus(cmd_status)
     mini_w = 320
-    mini_h = 36
     mini_x = W - PANEL_MARGIN_LR - mini_w
     mini_y = 8
     cap_text = cap or "진행 정보 없음"
     cv2.putText(img, cap_text, (mini_x, mini_y + 12), FONT, 0.45, (230,230,230), 1, cv2.LINE_AA)
     _bar(img, mini_x, mini_y + 18, mini_w, 10, 0.0 if ratio is None else float(max(0.0, min(1.0, ratio))))
 
-    # 칼럼 배치
-    total_w = W - 2 * PANEL_MARGIN_LR - 2 * COL_GAP
-    w_outer   = int(total_w * col_weights[0])
-    w_align   = int(total_w * col_weights[1])
-    w_recover = total_w - w_outer - w_align
-    x_outer   = PANEL_MARGIN_LR
-    x_align   = x_outer + w_outer + COL_GAP
-    x_recover = x_align + w_align + COL_GAP
-    top_y = PANEL_TITLE_H
+    # 칼럼 배치 — OUTER + ALIGN 두 열만
+    total_w = W - 2 * PANEL_MARGIN_LR - COL_GAP
+    w_outer = int(total_w * col_weights[0])
+    w_align = total_w - w_outer
+    x_outer = PANEL_MARGIN_LR
+    x_align = x_outer + w_outer + COL_GAP
+    top_y   = PANEL_TITLE_H
 
-    # ===== 노드 정의 =====
-    OUTER_CHECKS = ["DETECTED", "CHECK", "DONE"]
-    outer_nodes  = ["SEARCH"] + OUTER_CHECKS
+    # ===== 노드 정의 — align.py 의 실제 self.sub 이름과 동기화 =====
+    outer_nodes = ["SEARCH", "ALIGN", "INSERT", "DONE"]
 
-    # align.py의 실제 상태명과 동기화
-    ALIGN_CHECKS = ["DIST_CHECK", "YAW_CHECK", "OFFSET_CHECK", "READY_TO_DONE"]
-    ALIGN_FWD    = ["ALIGN_FWD_ADJUST"]
-    ALIGN_BWD    = ["ALIGN_BWD_ADJUST"]
-    ALIGN_ROT_YAW_TOL = ["ROTATE_RIGHT_UNTIL_YAW_TOL", "ROTATE_LEFT_UNTIL_YAW_TOL"]
-    # 우/좌 분기 체인
-    ALIGN_RIGHT_BRANCH = ["ALIGN_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT", "ALIGN_ROTATE_LEFT_90"]
-    ALIGN_LEFT_BRANCH  = ["ALIGN_ROTATE_LEFT",  "FORWARD_AFTER_LEFT",  "ALIGN_ROTATE_RIGHT_90"]
+    ALIGN_CHECKS       = ["YAW_CHECK", "OFFSET_CHECK", "DIST_CHECK", "READY_TO_DONE"]
+    ALIGN_YAW_CORRECT  = ["YAW_CORRECT_RIGHT", "YAW_CORRECT_LEFT"]
+    ALIGN_DIST_ADJUST  = ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"]
+    ALIGN_RIGHT_BRANCH = ["LATERAL_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT", "LATERAL_ROTATE_LEFT_BACK"]
+    ALIGN_LEFT_BRANCH  = ["LATERAL_ROTATE_LEFT",  "FORWARD_AFTER_LEFT",  "LATERAL_ROTATE_RIGHT_BACK"]
+    ALIGN_INSERT_SUB   = ["INSERT"]   # align.sub == "INSERT" (top-level 진입 후 align 의 sub 도 INSERT 로 set)
 
-    align_nodes = ALIGN_CHECKS + ALIGN_FWD + ALIGN_BWD + ALIGN_ROT_YAW_TOL + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH
-
-    # RECOVER (기존 정의 유지)
-    RECOVER_CHECKS      = ["DECIDE_TURN", "HOLD"]
-    RECOVER_ROT_INPLACE = ["RECOVER_ROTATE_LEFT", "RECOVER_ROTATE_RIGHT"]
-    recover_nodes = RECOVER_CHECKS + RECOVER_ROT_INPLACE
+    align_nodes = (ALIGN_CHECKS + ALIGN_YAW_CORRECT + ALIGN_DIST_ADJUST
+                   + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH + ALIGN_INSERT_SUB)
 
     # 활성 플래그
     top = getattr(fsm, "state", "SEARCH")
-    align_sub   = getattr(fsm, "align_sub", None) or getattr(getattr(fsm, "align", None), "sub", None)
-    recover_sub = getattr(fsm, "recover_sub", None) or getattr(getattr(fsm, "recover", None), "sub", None)
-    active_outer   = top in ("SEARCH","DETECTED","CHECK","DONE")
-    active_align   = (top == "ALIGN")
-    active_recover = (top == "RECOVER")
+    align_sub = getattr(fsm, "align_sub", None) or getattr(getattr(fsm, "align", None), "sub", None)
+    active_outer = top in outer_nodes
+    active_align = top in ("ALIGN", "INSERT")   # INSERT 상태도 align.sub 사용
 
-    # ===== 엣지 정의 =====
+    # ===== 엣지 정의 (다이어그램 conform) =====
     EDGES = [
         # OUTER
-        ("SEARCH", "DETECTED"),
-        ("DETECTED", "DIST_CHECK"),      # DETECTED → ALIGN 진입은 DIST_CHECK부터
-        ("DETECTED", "DECIDE_TURN"),
+        ("SEARCH", "ALIGN"),
+        ("ALIGN", "INSERT"),
+        ("INSERT", "DONE"),
 
-        ("HOLD", "CHECK"),
-        ("CHECK", "DONE"),
-        ("CHECK", "DIST_CHECK"),
+        # ALIGN 진입 — YAW_CHECK 우선
+        ("ALIGN", "YAW_CHECK"),
 
-        # ALIGN: 거리 보정
+        # YAW_CHECK → 3 branches
+        ("YAW_CHECK", "YAW_CORRECT_RIGHT"),
+        ("YAW_CHECK", "YAW_CORRECT_LEFT"),
+        ("YAW_CHECK", "READY_TO_DONE"),
+
+        # YAW_CORRECT → OFFSET_CHECK
+        ("YAW_CORRECT_RIGHT", "OFFSET_CHECK"),
+        ("YAW_CORRECT_LEFT",  "OFFSET_CHECK"),
+
+        # OFFSET_CHECK → DIST_CHECK
+        ("OFFSET_CHECK", "DIST_CHECK"),
+
+        # DIST_CHECK → 4 branches
         ("DIST_CHECK", "ALIGN_FWD_ADJUST"),
         ("DIST_CHECK", "ALIGN_BWD_ADJUST"),
+        ("DIST_CHECK", "LATERAL_ROTATE_RIGHT"),   # OFFSET_NEED_CORRECT (right)
+        ("DIST_CHECK", "LATERAL_ROTATE_LEFT"),    # OFFSET_NEED_CORRECT (left)
         ("DIST_CHECK", "YAW_CHECK"),
 
-        # YAW_CHECK → yaw 보정(좌/우) 또는 OFFSET_CHECK
-        ("YAW_CHECK", "ROTATE_RIGHT_UNTIL_YAW_TOL"),
-        ("YAW_CHECK", "ROTATE_LEFT_UNTIL_YAW_TOL"),
-        ("YAW_CHECK", "OFFSET_CHECK"),
+        # ALIGN_*_ADJUST → DIST_CHECK 복귀
+        ("ALIGN_FWD_ADJUST", "DIST_CHECK"),
+        ("ALIGN_BWD_ADJUST", "DIST_CHECK"),
 
-        # yaw tol 만족 시 OFFSET_CHECK로 인터록 후 진입 (상태 전이 단순화 표현)
-        ("ROTATE_RIGHT_UNTIL_YAW_TOL", "OFFSET_CHECK"),
-        ("ROTATE_LEFT_UNTIL_YAW_TOL",  "OFFSET_CHECK"),
+        # LATERAL 우측 chain
+        ("LATERAL_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT"),
+        ("FORWARD_AFTER_RIGHT",  "LATERAL_ROTATE_LEFT_BACK"),
+        ("LATERAL_ROTATE_LEFT_BACK", "YAW_CHECK"),
 
-        # OFFSET_CHECK → 우/좌 분기 or 재거리체크 or 완료
-        ("OFFSET_CHECK", "ALIGN_ROTATE_RIGHT"),
-        ("OFFSET_CHECK", "ALIGN_ROTATE_LEFT"),
-        ("OFFSET_CHECK", "DIST_CHECK"),
-        ("OFFSET_CHECK", "READY_TO_DONE"),
+        # LATERAL 좌측 chain
+        ("LATERAL_ROTATE_LEFT", "FORWARD_AFTER_LEFT"),
+        ("FORWARD_AFTER_LEFT",  "LATERAL_ROTATE_RIGHT_BACK"),
+        ("LATERAL_ROTATE_RIGHT_BACK", "YAW_CHECK"),
 
-        # --- 우측 분기: RIGHT(90) → [STOP] → FORWARD(FWD_SEC) → [STOP] → LEFT(90) → YAW_CHECK (수정)
-        ("ALIGN_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT"),
-        ("FORWARD_AFTER_RIGHT", "ALIGN_ROTATE_LEFT_90"),
-        ("ALIGN_ROTATE_LEFT_90", "YAW_CHECK"),  # 변경: 기존 OFFSET_CHECK -> YAW_CHECK
-
-        # --- 좌측 분기: LEFT(90) → [STOP] → FORWARD(FWD_SEC) → [STOP] → RIGHT(90) → YAW_CHECK (수정)
-        ("ALIGN_ROTATE_LEFT", "FORWARD_AFTER_LEFT"),
-        ("FORWARD_AFTER_LEFT", "ALIGN_ROTATE_RIGHT_90"),
-        ("ALIGN_ROTATE_RIGHT_90", "YAW_CHECK"),  # 변경: 기존 OFFSET_CHECK -> YAW_CHECK
-
-        # DONE
-        ("READY_TO_DONE", "DONE"),
-
-        # RECOVER
-        ("DECIDE_TURN", "RECOVER_ROTATE_LEFT"),
-        ("DECIDE_TURN", "RECOVER_ROTATE_RIGHT"),
-        ("DECIDE_TURN", "HOLD"),
+        # READY_TO_DONE → top-level INSERT
+        ("READY_TO_DONE", "INSERT"),
     ]
 
-    # ===== 그룹별 레이아웃 =====
-    # OUTER: BFS
-    inner_x_outer  = x_outer + GROUP_PAD
-    inner_w_outer  = w_outer - 2 * GROUP_PAD
-    start_y_outer  = top_y + GROUP_PAD + 18
+    # ===== OUTER 레이아웃 (수직 일렬) =====
+    inner_x_outer = x_outer + GROUP_PAD
+    inner_w_outer = w_outer - 2 * GROUP_PAD
+    start_y_outer = top_y + GROUP_PAD + 18
 
-    outer_edges_in = _induced_edges(EDGES, outer_nodes)
-    outer_entries  = _entry_candidates(outer_nodes, outer_edges_in)
-    pos_outer, y_out_last = _layout_hier(inner_x_outer, start_y_outer, inner_w_outer,
-                                         outer_nodes, outer_edges_in, outer_entries)
+    outer_levels = [[n] for n in outer_nodes]   # SEARCH / ALIGN / INSERT / DONE 각 행 1개
+    pos_outer, y_out_last = _layout_by_levels(inner_x_outer, start_y_outer, inner_w_outer, outer_levels)
     gy_start_outer = top_y
     gy_end_outer   = y_out_last + GROUP_PAD
 
-    # ALIGN: 명시 순서
-    inner_x_align  = x_align + GROUP_PAD
-    inner_w_align  = w_align - 2 * GROUP_PAD
-    start_y_align  = top_y + GROUP_PAD + 18
+    # ===== ALIGN 레이아웃 (다이어그램 흐름 순서) =====
+    inner_x_align = x_align + GROUP_PAD
+    inner_w_align = w_align - 2 * GROUP_PAD
+    start_y_align = top_y + GROUP_PAD + 18
 
     align_levels_ordered = [
+        ["YAW_CHECK"],
+        ["YAW_CORRECT_RIGHT", "YAW_CORRECT_LEFT"],
+        ["OFFSET_CHECK"],
         ["DIST_CHECK"],
         ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"],
-        ["YAW_CHECK"],
-        ["ROTATE_RIGHT_UNTIL_YAW_TOL", "ROTATE_LEFT_UNTIL_YAW_TOL"],
-        ["OFFSET_CHECK"],
-        ["ALIGN_ROTATE_RIGHT", "ALIGN_ROTATE_LEFT"],
+        ["LATERAL_ROTATE_RIGHT", "LATERAL_ROTATE_LEFT"],
         ["FORWARD_AFTER_RIGHT", "FORWARD_AFTER_LEFT"],
-        ["ALIGN_ROTATE_LEFT_90", "ALIGN_ROTATE_RIGHT_90"],
+        ["LATERAL_ROTATE_LEFT_BACK", "LATERAL_ROTATE_RIGHT_BACK"],
         ["READY_TO_DONE"],
+        ["INSERT"],
     ]
-    # 누락 보호
     flat = [n for row in align_levels_ordered for n in row]
     remain = [n for n in align_nodes if n not in flat]
     if remain:
@@ -367,20 +351,8 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.26, 0.50,
     gy_start_align = top_y
     gy_end_align   = y_align_last + GROUP_PAD
 
-    # RECOVER: BFS
-    inner_x_recover  = x_recover + GROUP_PAD
-    inner_w_recover  = w_recover - 2 * GROUP_PAD
-    start_y_recover  = top_y + GROUP_PAD + 18
-
-    recover_edges_in = _induced_edges(EDGES, recover_nodes)
-    recover_entries  = ["DECIDE_TURN"] if "DECIDE_TURN" in recover_nodes else _entry_candidates(recover_nodes, recover_edges_in)
-    pos_recover, y_recover_last = _layout_hier(inner_x_recover, start_y_recover, inner_w_recover,
-                                               recover_nodes, recover_edges_in, recover_entries)
-    gy_start_recover = top_y
-    gy_end_recover   = y_recover_last + GROUP_PAD
-
     # 패널 세로 크기 자동 확장
-    needed_H = max(gy_end_outer, gy_end_align, gy_end_recover) + GROUP_PAD
+    needed_H = max(gy_end_outer, gy_end_align) + GROUP_PAD
     if needed_H > H:
         pad = needed_H - H
         pad_img = np.zeros((pad, W, 3), dtype=np.uint8); pad_img[:] = PANEL_BG
@@ -388,17 +360,15 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.26, 0.50,
         H = needed_H
 
     # 그룹 박스
-    _draw_group(img, x_outer,   gy_start_outer,   w_outer,   gy_end_outer   - gy_start_outer,   "OUTER",   active=active_outer)
-    _draw_group(img, x_align,   gy_start_align,   w_align,   gy_end_align   - gy_start_align,   "ALIGN",   active=active_align)
-    _draw_group(img, x_recover, gy_start_recover, w_recover, gy_end_recover - gy_start_recover, "RECOVER", active=active_recover)
+    _draw_group(img, x_outer, gy_start_outer, w_outer, gy_end_outer - gy_start_outer, "OUTER", active=active_outer)
+    _draw_group(img, x_align, gy_start_align, w_align, gy_end_align - gy_start_align, "ALIGN", active=active_align)
 
     # 포지션 병합
     POS = {}
     POS.update(pos_outer)
     POS.update(pos_align)
-    POS.update(pos_recover)
 
-    # 엣지 그리기(센터-센터)
+    # 엣지 그리기 (센터-센터)
     def C(name):
         x, y = POS[name]
         return (x + NODE_W//2, y + NODE_H//2)
@@ -407,7 +377,7 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.26, 0.50,
         if u in POS and v in POS:
             _arrow(img, C(u), C(v))
 
-    # 노드 그리기(활성/디밍)
+    # 노드 그리기 (활성/디밍)
     for name, (x, y) in POS.items():
         active = False
         dim = False
@@ -419,20 +389,13 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.26, 0.50,
                 active = True
             elif not active_align:
                 dim = True
-        elif name in recover_nodes:
-            if active_recover and (recover_sub == name):
-                active = True
-            elif not active_recover:
-                dim = True
 
         _draw_node(img, name, x, y, active=active, dim=dim)
 
     # 하단 상태 표시
     status = f"{top}"
-    if top == "ALIGN" and align_sub:
+    if top in ("ALIGN", "INSERT") and align_sub:
         status += f" • {align_sub}"
-    if top == "RECOVER" and recover_sub:
-        status += f" • {recover_sub}"
     cv2.putText(img, status, (16, H - 14), FONT, 0.50, (225, 225, 225), 1, cv2.LINE_AA)
 
     return img
