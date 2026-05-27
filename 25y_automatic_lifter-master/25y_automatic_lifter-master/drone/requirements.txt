@@ -1,0 +1,6 @@
+ultralytics
+djitellopy
+opencv-python
+numpy
+deep-sort-realtime
+cjm-byte-track

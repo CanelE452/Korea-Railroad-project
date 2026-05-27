@@ -18,8 +18,20 @@ run_used.yml
 # Large data / recordings / model weights (no images in repo)
 challenge/data/
 challenge/weights/
+challenge/model/
 depth_cam/rec/
 depth_cam/runs/
+
+# 25y_automatic_lifter-master 의 학습 결과 / 녹화 / 캐시
+25y_automatic_lifter-master/**/runs/
+25y_automatic_lifter-master/**/rec/
+25y_automatic_lifter-master/**/__pycache__/
+
+# Playwright 자동화 출력 (스크린샷 / console log)
+.playwright-mcp/
+
+# yolo / DOPE pre-trained 가중치 (root)
+*.pt
 
 # Image / video / capture binaries
 *.png
