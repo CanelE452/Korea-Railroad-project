@@ -214,13 +214,14 @@ def _layout_by_levels(inner_x, start_y, inner_w, levels):
 def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)):
     """
     새 다이어그램 (2026-05-27 snapshot 모델) 시각화:
-      OUTER:  SEARCH → ALIGN → INSERT → DONE
-      ALIGN:  YAW_CHECK ↔ YAW_CORRECT_R/L → OFFSET_CHECK → DIST_CHECK
-              → OFFSET_NEED_CORRECT 분기 → LATERAL_ROTATE_R/L
-              → FORWARD_AFTER_R/L → LATERAL_ROTATE_L/R_BACK → YAW_CHECK
-              → READY_TO_DONE → (top-level) INSERT → DONE
+      흐름:  SEARCH → ALIGN (composite) → INSERT → DONE
+      ALIGN: YAW_CHECK ↔ YAW_CORRECT_R/L → OFFSET_CHECK → DIST_CHECK
+             → OFFSET_NEED_CORRECT 분기 → LATERAL_ROTATE_R/L
+             → FORWARD_AFTER_R/L → LATERAL_ROTATE_L/R_BACK → YAW_CHECK
+             → READY_TO_DONE → INSERT (top-level)
 
-    RECOVER 그룹 제거 (새 FSM 에 없음).
+    mermaid stateDiagram 과 동일 — OUTER 그룹 박스 없음, ALIGN 만 composite 박스.
+    RECOVER / DETECTED / CHECK / HOLD 모두 제거.
     """
     H, W = panel_size
     img = np.zeros((H, W, 3), dtype=np.uint8)
@@ -240,42 +241,31 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
     cv2.putText(img, cap_text, (mini_x, mini_y + 12), FONT, 0.45, (230,230,230), 1, cv2.LINE_AA)
     _bar(img, mini_x, mini_y + 18, mini_w, 10, 0.0 if ratio is None else float(max(0.0, min(1.0, ratio))))
 
-    # 칼럼 배치 — OUTER + ALIGN 두 열만
-    total_w = W - 2 * PANEL_MARGIN_LR - COL_GAP
-    w_outer = int(total_w * col_weights[0])
-    w_align = total_w - w_outer
-    x_outer = PANEL_MARGIN_LR
-    x_align = x_outer + w_outer + COL_GAP
-    top_y   = PANEL_TITLE_H
-
     # ===== 노드 정의 — align.py 의 실제 self.sub 이름과 동기화 =====
-    outer_nodes = ["SEARCH", "ALIGN", "INSERT", "DONE"]
+    # top-level (그룹 박스 없이 독립 노드)
+    top_level_nodes = ["SEARCH", "INSERT", "DONE"]
 
+    # ALIGN composite 내부
     ALIGN_CHECKS       = ["YAW_CHECK", "OFFSET_CHECK", "DIST_CHECK", "READY_TO_DONE"]
     ALIGN_YAW_CORRECT  = ["YAW_CORRECT_RIGHT", "YAW_CORRECT_LEFT"]
     ALIGN_DIST_ADJUST  = ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"]
     ALIGN_RIGHT_BRANCH = ["LATERAL_ROTATE_RIGHT", "FORWARD_AFTER_RIGHT", "LATERAL_ROTATE_LEFT_BACK"]
     ALIGN_LEFT_BRANCH  = ["LATERAL_ROTATE_LEFT",  "FORWARD_AFTER_LEFT",  "LATERAL_ROTATE_RIGHT_BACK"]
-    ALIGN_INSERT_SUB   = ["INSERT"]   # align.sub == "INSERT" (top-level 진입 후 align 의 sub 도 INSERT 로 set)
 
     align_nodes = (ALIGN_CHECKS + ALIGN_YAW_CORRECT + ALIGN_DIST_ADJUST
-                   + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH + ALIGN_INSERT_SUB)
+                   + ALIGN_RIGHT_BRANCH + ALIGN_LEFT_BRANCH)
 
     # 활성 플래그
     top = getattr(fsm, "state", "SEARCH")
     align_sub = getattr(fsm, "align_sub", None) or getattr(getattr(fsm, "align", None), "sub", None)
-    active_outer = top in outer_nodes
     active_align = top in ("ALIGN", "INSERT")   # INSERT 상태도 align.sub 사용
 
-    # ===== 엣지 정의 (다이어그램 conform) =====
+    # ===== 엣지 정의 (mermaid conform) =====
     EDGES = [
-        # OUTER
-        ("SEARCH", "ALIGN"),
-        ("ALIGN", "INSERT"),
+        # top-level 흐름
+        ("SEARCH", "YAW_CHECK"),        # SEARCH → ALIGN 진입 (YAW_CHECK 부터)
+        ("READY_TO_DONE", "INSERT"),    # ALIGN composite 탈출 → top-level INSERT
         ("INSERT", "DONE"),
-
-        # ALIGN 진입 — YAW_CHECK 우선
-        ("ALIGN", "YAW_CHECK"),
 
         # YAW_CHECK → 3 branches
         ("YAW_CHECK", "YAW_CORRECT_RIGHT"),
@@ -309,25 +299,22 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
         ("LATERAL_ROTATE_LEFT", "FORWARD_AFTER_LEFT"),
         ("FORWARD_AFTER_LEFT",  "LATERAL_ROTATE_RIGHT_BACK"),
         ("LATERAL_ROTATE_RIGHT_BACK", "YAW_CHECK"),
-
-        # READY_TO_DONE → top-level INSERT
-        ("READY_TO_DONE", "INSERT"),
     ]
 
-    # ===== OUTER 레이아웃 (수직 일렬) =====
-    inner_x_outer = x_outer + GROUP_PAD
-    inner_w_outer = w_outer - 2 * GROUP_PAD
-    start_y_outer = top_y + GROUP_PAD + 18
+    # ===== 레이아웃 =====
+    # 왼쪽 column 에 SEARCH (위), INSERT (중), DONE (아래) 독립 노드.
+    # 가운데~오른쪽에 ALIGN composite 박스.
+    inner_left_x  = PANEL_MARGIN_LR
+    inner_left_w  = int((W - 2 * PANEL_MARGIN_LR - COL_GAP) * col_weights[0])
+    inner_right_x = inner_left_x + inner_left_w + COL_GAP
+    inner_right_w = (W - 2 * PANEL_MARGIN_LR) - inner_left_w - COL_GAP
+    top_y = PANEL_TITLE_H
 
-    outer_levels = [[n] for n in outer_nodes]   # SEARCH / ALIGN / INSERT / DONE 각 행 1개
-    pos_outer, y_out_last = _layout_by_levels(inner_x_outer, start_y_outer, inner_w_outer, outer_levels)
-    gy_start_outer = top_y
-    gy_end_outer   = y_out_last + GROUP_PAD
-
-    # ===== ALIGN 레이아웃 (다이어그램 흐름 순서) =====
-    inner_x_align = x_align + GROUP_PAD
-    inner_w_align = w_align - 2 * GROUP_PAD
-    start_y_align = top_y + GROUP_PAD + 18
+    # ALIGN composite 박스 안쪽 좌표
+    align_box_x = inner_right_x
+    align_inner_x = align_box_x + GROUP_PAD
+    align_inner_w = inner_right_w - 2 * GROUP_PAD
+    align_inner_start_y = top_y + GROUP_PAD + 18
 
     align_levels_ordered = [
         ["YAW_CHECK"],
@@ -339,33 +326,45 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
         ["FORWARD_AFTER_RIGHT", "FORWARD_AFTER_LEFT"],
         ["LATERAL_ROTATE_LEFT_BACK", "LATERAL_ROTATE_RIGHT_BACK"],
         ["READY_TO_DONE"],
-        ["INSERT"],
     ]
     flat = [n for row in align_levels_ordered for n in row]
     remain = [n for n in align_nodes if n not in flat]
     if remain:
         align_levels_ordered.append(remain)
 
-    pos_align, y_align_last = _layout_by_levels(inner_x_align, start_y_align, inner_w_align,
-                                                align_levels_ordered)
-    gy_start_align = top_y
-    gy_end_align   = y_align_last + GROUP_PAD
+    pos_align, y_align_last = _layout_by_levels(align_inner_x, align_inner_start_y,
+                                                align_inner_w, align_levels_ordered)
+    align_box_y_start = top_y
+    align_box_y_end   = y_align_last + GROUP_PAD
+
+    # 왼쪽 column 의 top-level 노드 — ALIGN 박스 높이에 맞춰 균등 배치
+    align_box_h = align_box_y_end - align_box_y_start
+    cx_left = inner_left_x + inner_left_w // 2 - NODE_W // 2
+    n_top = len(top_level_nodes)
+    if n_top >= 2:
+        spacing = (align_box_h - NODE_H) // (n_top - 1)
+    else:
+        spacing = 0
+    pos_top = {}
+    for i, name in enumerate(top_level_nodes):
+        y = align_box_y_start + i * spacing
+        pos_top[name] = (cx_left, y)
 
     # 패널 세로 크기 자동 확장
-    needed_H = max(gy_end_outer, gy_end_align) + GROUP_PAD
+    needed_H = align_box_y_end + GROUP_PAD
     if needed_H > H:
         pad = needed_H - H
         pad_img = np.zeros((pad, W, 3), dtype=np.uint8); pad_img[:] = PANEL_BG
         img = np.vstack([img, pad_img])
         H = needed_H
 
-    # 그룹 박스
-    _draw_group(img, x_outer, gy_start_outer, w_outer, gy_end_outer - gy_start_outer, "OUTER", active=active_outer)
-    _draw_group(img, x_align, gy_start_align, w_align, gy_end_align - gy_start_align, "ALIGN", active=active_align)
+    # ALIGN composite 박스만 그림 (OUTER 박스 없음)
+    _draw_group(img, align_box_x, align_box_y_start, inner_right_w, align_box_h, "ALIGN",
+                active=active_align)
 
     # 포지션 병합
     POS = {}
-    POS.update(pos_outer)
+    POS.update(pos_top)
     POS.update(pos_align)
 
     # 엣지 그리기 (센터-센터)
@@ -382,7 +381,7 @@ def draw_fsm_diagram_panel(fsm, panel_size=(820, 1200), col_weights=(0.28, 0.72)
         active = False
         dim = False
 
-        if name in outer_nodes:
+        if name in top_level_nodes:
             active = (top == name)
         elif name in align_nodes:
             if active_align and (align_sub == name):
