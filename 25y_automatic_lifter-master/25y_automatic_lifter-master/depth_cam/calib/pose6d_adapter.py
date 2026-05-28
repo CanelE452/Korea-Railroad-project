@@ -16,7 +16,11 @@
 #                    사이 각도. ψ=0 일 때 forklift.yaw == pallet.yaw.
 #                    R 의 column (팔레트 +Z 축의 camera frame 표현) 으로 추출.
 #                    회전이라 기준점에 무관 (centroid든 어디든 같은 값).
-#   d_lateral (m)  : 카메라 +X (right) 방향 centroid 오프셋. 목표 0.
+#   d_lateral (m)  : 카메라 +X (right) 방향 centroid 오프셋의 **부호 반전**값.
+#                    부호 반전 이유: align.py 의 LATERAL 분기는 "d_lat<0 → ROT_RIGHT,
+#                    d_lat>0 → ROT_LEFT" 인데, OpenCV +X right 정의 그대로 쓰면
+#                    실차에서 "반대 방향 회전" 이 발생함 (2026-05-27 사용자 보고).
+#                    시뮬에서 부호 반전으로 LATERAL chain 정상 진입 검증 완료.
 #   d_forward (m)  : 카메라 +Z (forward) 방향 centroid 거리. 목표 ALIGN_DIST_M
 #                    (centroid 기준).
 #
@@ -87,8 +91,10 @@ def pose6d_to_align_vars(R, t, anchor: str = "entry_face") -> Tuple[float, float
         offset = PALLET_DEPTH_M / 2.0
         ax = tx + Rm[0][2] * offset
         az = tz + Rm[2][2] * offset
-        return psi_deg, float(ax), float(az)
-    return psi_deg, float(tx), float(tz)
+        # d_lateral 부호 반전 — align.py LATERAL 분기 매칭 (시뮬 검증 완료)
+        return psi_deg, float(-ax), float(az)
+    # centroid anchor 도 동일하게 부호 반전
+    return psi_deg, float(-tx), float(tz)
 
 
 def keypoints9_to_align_vars(

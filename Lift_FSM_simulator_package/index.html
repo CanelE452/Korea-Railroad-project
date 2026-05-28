@@ -87,8 +87,10 @@
           <label>Rotate deg/s <input id="rotSpeed" type="number" min="5" max="180" step="5" value="55"></label>
           <label>ALIGN_DIST_M <input id="standOff" type="number" min="0.2" max="4" step="0.1" value="1.0"></label>
           <label>ALIGN_BAND_M <input id="alignBandM" type="number" min="0.02" max="1.0" step="0.02" value="0.10"></label>
+          <label>Cam pitch deg (+ = down) <input id="mountPitchDeg" type="number" min="-30" max="45" step="0.5" value="10.0"></label>
+          <label>Cam roll deg (+ = CW) <input id="mountRollDeg" type="number" min="-15" max="15" step="0.5" value="0.0"></label>
         </div>
-        <p class="hint">25y_automatic_lifter config.py 일치: vmax=0.306 (FWD_A=0.07156, FWD_T1=4.278), INSERT_FWD_MPS=0.25, ALIGN_DIST_M=2.20 (시뮬 캔버스용 1.0). FWD/BACK 운동은 motion_models.py 의 가속+정속 piecewise.</p>
+        <p class="hint">25y_automatic_lifter config.py 일치: vmax=0.306 (FWD_A=0.07156, FWD_T1=4.278), INSERT_FWD_MPS=0.25, ALIGN_DIST_M=2.20 (시뮬 캔버스용 1.0). FWD/BACK 운동은 motion_models.py 의 가속+정속 piecewise. Cam pitch/roll = RealSense D435I 마스트 마운트 tilt (실차 검증용).</p>
       </section>
 
       <section class="panel-section">
@@ -137,7 +139,7 @@
           <label>OFF_TOL_M (d_lat) <input id="latTol" type="number" min="0.01" max="0.5" step="0.01" value="0.12"></label>
           <label>YAW_TOL_DEG <input id="psiTol" type="number" min="0.5" max="15" step="0.5" value="2.0"></label>
           <label>LATERAL_BACK_YAW <input id="lateralBackYawDeg" type="number" min="60" max="100" step="1" value="85"></label>
-          <label>INSERT_SAFETY_BACK_M <input id="insertSafetyBackM" type="number" min="0.0" max="0.50" step="0.01" value="0.10"></label>
+          <label>INSERT_BODY_SAFETY_M <input id="insertBodySafetyM" type="number" min="0.0" max="0.50" step="0.01" value="0.05"></label>
         </div>
         <p class="hint">config.py 일치: OFF_TOL_M=0.12, YAW_TOL_DEG=2, LATERAL_BACK_YAW_DEG=85, STOP_SEC=1.2 (코드 default).</p>
       </section>

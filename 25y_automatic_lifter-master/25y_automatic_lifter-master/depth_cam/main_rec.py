@@ -1,28 +1,38 @@
 # main_rec.py (실행 즉시 자동 녹화 시작 버전: 첫 프레임 생성 시 VideoWriter 자동 초기화)
 
 import sys
+import time
 import cv2
 import numpy as np
 import pyrealsense2 as rs
 import os
 import math
 from datetime import datetime
+from collections import deque
 
 from calib.config import (
     SAMPLE_STRIDE, Z_INLIER_THRESH, MIN_POINTS,
     EMA_ALPHA_OFFSET, EMA_ALPHA_YAW, EMA_ALPHA_WIDTH,
     COLOR_ALERT, COLOR_STATUS_OK, COLOR_META, COLOR_BOX, COLOR_CNT, COLOR_CENTER,
     COLOR_YAW, COLOR_OFFSET, COLOR_WIDTH,
-    USE_6D_MODE, MODEL_PATH_6D, DOPE_INPUT_HEIGHT, DOPE_PEAK_THRESHOLD, DOPE_PEAK_SIGMA,
+    USE_6D_MODE, USE_PERCEPTION_YOLO,
+    MODEL_PATH_6D, DOPE_INPUT_HEIGHT, DOPE_PEAK_THRESHOLD, DOPE_PEAK_SIGMA,
+    DOPE_THRESH_MAP, DOPE_THRESH_POINTS, DOPE_THRESH_ANGLE, DOPE_SOFTMAX,
+    DOPE_GATE_MIN_KP, DOPE_GATE_MAX_REPROJ_PX, DOPE_GATE_Z_MIN_M, DOPE_GATE_Z_MAX_M,
+    DOPE_GATE_DEPTH_REL, DOPE_GATE_EDGE_RATIO_TOL, DOPE_CONFIRM_FRAMES,
+    PALLET_WIDTH_M, PALLET_HEIGHT_M, PALLET_DEPTH_M,
 )
 from calib.hud import draw_panel
-from calib.perception import Perception
-from calib.geometry import robust_points_from_mask_or_roi, fit_plane_yaw_from_points
 from calib.fsm import CalibrationFSM
-from calib.control import can_init, can_close
+from calib.control import can_init, can_close, is_mock as can_is_mock
 from calib.utils import fmt_deg, fmt_m
-from calib.pose6d_adapter import keypoints9_to_align_vars
+from calib.pose6d_adapter import pose6d_to_align_vars
 from ui.diagram import draw_fsm_diagram_panel
+
+# YOLO segmentation + RGB-D RANSAC 은 USE_PERCEPTION_YOLO=True 일 때만 import 시도.
+if USE_PERCEPTION_YOLO:
+    from calib.perception import Perception
+    from calib.geometry import robust_points_from_mask_or_roi, fit_plane_yaw_from_points
 
 
 def setup_video_writer_filename():
@@ -43,6 +53,16 @@ def realsense_check_or_exit():
         name = d.get_info(rs.camera_info.name) if d.supports(rs.camera_info.name) else "Unknown"
         sn   = d.get_info(rs.camera_info.serial_number) if d.supports(rs.camera_info.serial_number) else "N/A"
         print(f"  - {name} (S/N {sn})")
+    # 시작 시 hardware_reset — 이전 process 가 USB 깨끗하게 release 안 했을 때
+    # 발생하는 "Frame didn't arrive within 5000" 방지 (ESC 종료 후 재시작 안정성).
+    try:
+        for d in devs:
+            d.hardware_reset()
+        print("🔄 RealSense hardware_reset 완료 — 재인식 대기 (5s)...")
+        import time as _time
+        _time.sleep(5)
+    except Exception as e:
+        print(f"⚠️  hardware_reset 실패 (무시): {e}")
 
 
 # === rel_yaw.py 로직 이식: gyro.Y 적분 기반 상대 yaw 추정기 ===
@@ -122,15 +142,22 @@ class RelYawEstimator:
 def main():
     realsense_check_or_exit()
 
-    # CAN 초기화
+    # CAN 초기화 — canlib DLL 없는 환경은 mock 으로 silent 동작 (실제 송수신 없음)
     print("CAN 통신 초기화 중...")
-    if can_init():
+    can_ok = can_init()
+    if can_ok and not can_is_mock():
         print("✅ CAN 통신 초기화 성공(하트비트 자동)")
+    elif can_ok and can_is_mock():
+        print("⚠️  CAN 통신: canlib DLL 부재 — MOCK 모드 (실제 송수신 없음, FSM 시각화만 동작)")
+        print("    상세 로그 보려면: $env:CAN_MOCK_VERBOSE=1 (PowerShell)  또는  CAN_MOCK_VERBOSE=1 (bash)")
     else:
-        print("❌ CAN 통신 초기화 실패: MOCK 모드로 동작합니다.")
+        print("❌ CAN 통신 초기화 실패 — MOCK 모드로 fallback 합니다 (FSM 시각화만 동작)")
 
     # 모듈
-    perception = Perception()
+    if USE_PERCEPTION_YOLO:
+        perception = Perception()
+    else:
+        perception = None
     fsm = CalibrationFSM()
 
     # === 6D pose (DOPE) 추론기 ===
@@ -140,9 +167,25 @@ def main():
             from calib.dope_inference import DopePoseEstimator
             dope_pose = DopePoseEstimator(
                 weights_path=MODEL_PATH_6D,
+                pallet_width_m=PALLET_WIDTH_M,
+                pallet_height_m=PALLET_HEIGHT_M,
+                pallet_depth_m=PALLET_DEPTH_M,
                 input_height=DOPE_INPUT_HEIGHT,
                 peak_threshold=DOPE_PEAK_THRESHOLD,
                 peak_sigma=DOPE_PEAK_SIGMA,
+                thresh_map=DOPE_THRESH_MAP,
+                thresh_points=DOPE_THRESH_POINTS,
+                thresh_angle=DOPE_THRESH_ANGLE,
+                softmax=DOPE_SOFTMAX,
+                gates={
+                    "min_kp": DOPE_GATE_MIN_KP,
+                    "max_reproj_px": DOPE_GATE_MAX_REPROJ_PX,
+                    "z_min_m": DOPE_GATE_Z_MIN_M,
+                    "z_max_m": DOPE_GATE_Z_MAX_M,
+                    "depth_rel": DOPE_GATE_DEPTH_REL,
+                    "edge_ratio_tol": DOPE_GATE_EDGE_RATIO_TOL,
+                },
+                confirm_frames=DOPE_CONFIRM_FRAMES,
             )
             print("✅ DOPE 6D pose estimator 초기화 완료")
         except Exception as e:
@@ -153,7 +196,8 @@ def main():
     # === RealSense 파이프라인 구성 ===
     pipeline = rs.pipeline()
     cfg = rs.config()
-    # RGB-D: 640x480 @ 15fps
+    # RGB-D: 640×480 @ 15fps — challenge/data/*.png 학습 데이터 해상도와 동일.
+    # challenge/config/task.yaml: camera.width=640, height=480, fx=614.18, fy=614.31.
     cfg.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 15)
     cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)
     # IMU: rel_yaw 계산에 필수
@@ -179,6 +223,12 @@ def main():
     rel_yaw_est = RelYawEstimator(alpha=0.98)
     rel_yaw = 0.0
     last_accel_md = None  # gyro와 짝지어 사용할 최근 accel 저장
+
+    # === FPS / DOPE timing 추적 ===
+    fps_window = deque(maxlen=30)   # 최근 30 frame
+    dope_fps_window = deque(maxlen=30)
+    last_frame_ts = time.perf_counter()
+    last_dope_ms = 0.0
 
     try:
         while True:
@@ -211,7 +261,7 @@ def main():
             color_frame = aligned.get_color_frame()
             depth_frame = aligned.get_depth_frame()
 
-            # 프레임 누락 시 안전 처리
+            # 프레임 누락 시 안전 처리 — 640×480 placeholder
             if not color_frame or not depth_frame:
                 vis = np.zeros((480, 640, 3), dtype=np.uint8)
                 draw_panel(vis, [("프레임 없음", COLOR_ALERT)])
@@ -257,10 +307,10 @@ def main():
             vis = color_img.copy()
             H, W = vis.shape[:2]
 
-            # 1) 감지
-            det_ok, mask_bin, bbox_now = perception.infer_front(color_img)
-
-            # 2) 3D 포인트/기하
+            # 1) YOLO segmentation (선택) — USE_PERCEPTION_YOLO=False 면 skip
+            det_ok = False
+            mask_bin = None
+            bbox_now = None
             ok_plane = False
             yaw_deg = None
             ex = ey = ez = None
@@ -269,131 +319,292 @@ def main():
             dist_z = None
             pts_in = None
 
-            if det_ok and (mask_bin is not None) and (bbox_now is not None):
-                ok_pts, pts_in = robust_points_from_mask_or_roi(
-                    depth_frame=depth_frame, depth_intrin=depth_intrin,
-                    mask_or_roi=mask_bin, stride=SAMPLE_STRIDE,
-                    z_inlier_thresh=Z_INLIER_THRESH, min_points=MIN_POINTS
-                )
-                if ok_pts:
-                    ex = float(np.median(pts_in[:, 0]))
-                    ey = float(np.mean(pts_in[:, 1]))
-                    ez = float(np.mean(pts_in[:, 2]))
-                    cur_off = np.array([ex, ey, ez], dtype=np.float32)
+            if perception is not None:
+                det_ok, mask_bin, bbox_now = perception.infer_front(color_img)
+                # 2) 3D 포인트/기하 — YOLO mask 영역의 depth points 로 plane fit
+                if det_ok and (mask_bin is not None) and (bbox_now is not None):
+                    ok_pts, pts_in = robust_points_from_mask_or_roi(
+                        depth_frame=depth_frame, depth_intrin=depth_intrin,
+                        mask_or_roi=mask_bin, stride=SAMPLE_STRIDE,
+                        z_inlier_thresh=Z_INLIER_THRESH, min_points=MIN_POINTS
+                    )
+                    if ok_pts:
+                        ex = float(np.median(pts_in[:, 0]))
+                        ey = float(np.mean(pts_in[:, 1]))
+                        ez = float(np.mean(pts_in[:, 2]))
+                        cur_off = np.array([ex, ey, ez], dtype=np.float32)
 
-                    if offset_smooth is None:
-                        offset_smooth = cur_off.copy()
-                    else:
-                        offset_smooth = (1 - EMA_ALPHA_OFFSET) * offset_smooth + EMA_ALPHA_OFFSET * cur_off
-
-                    ok_plane, yaw_deg, a, b = fit_plane_yaw_from_points(pts_in)
-                    if ok_plane:
-                        if yaw_smooth is None:
-                            yaw_smooth = yaw_deg
+                        if offset_smooth is None:
+                            offset_smooth = cur_off.copy()
                         else:
-                            yaw_smooth = (1 - EMA_ALPHA_YAW) * yaw_smooth + EMA_ALPHA_YAW * yaw_deg
+                            offset_smooth = (1 - EMA_ALPHA_OFFSET) * offset_smooth + EMA_ALPHA_OFFSET * cur_off
 
-                    width_now = float(np.max(pts_in[:, 0]) - np.min(pts_in[:, 0]))
-                    if width_smooth is None:
-                        width_smooth = width_now
-                    else:
-                        width_smooth = (1 - EMA_ALPHA_WIDTH) * width_smooth + EMA_ALPHA_WIDTH * width_now
+                        ok_plane, yaw_deg, a, b = fit_plane_yaw_from_points(pts_in)
+                        if ok_plane:
+                            if yaw_smooth is None:
+                                yaw_smooth = yaw_deg
+                            else:
+                                yaw_smooth = (1 - EMA_ALPHA_YAW) * yaw_smooth + EMA_ALPHA_YAW * yaw_deg
 
-                    c3d_mean = np.mean(pts_in, axis=0).astype(np.float32)
-                    dist_euclid = float(np.linalg.norm(c3d_mean))
-                    dist_z = float(c3d_mean[2])
+                        width_now = float(np.max(pts_in[:, 0]) - np.min(pts_in[:, 0]))
+                        if width_smooth is None:
+                            width_smooth = width_now
+                        else:
+                            width_smooth = (1 - EMA_ALPHA_WIDTH) * width_smooth + EMA_ALPHA_WIDTH * width_now
 
-            # 2.5) 6D pose (DOPE) 추론 — det_ok 와 무관하게 시도하여
-            #      YOLO segmentation 이 놓친 경우에도 keypoint 기반 검출 가능.
+                        c3d_mean = np.mean(pts_in, axis=0).astype(np.float32)
+                        dist_euclid = float(np.linalg.norm(c3d_mean))
+                        dist_z = float(c3d_mean[2])
+
+            # 2.5) 6D pose (DOPE) — challenge run_live.py 와 동일 path
+            #      (ObjectDetector + CuboidPNPSolver + camera-facing + gate + confirm).
+            #      det_ok 와 무관하게 시도해 YOLO segmentation 이 놓친 케이스도 추론.
+            #      gate 실패해도 dict 반환 (시각화용) — gate_passed=False 면 회색 표시.
             psi_pallet_deg: float = None
             d_lateral_m: float = None
             d_forward_m: float = None
-            kps9 = None
+            dope_result = None
             if dope_pose is not None:
+                _dope_t0 = time.perf_counter()
                 try:
-                    kps9 = dope_pose.infer_keypoints9(color_img)
+                    dope_result = dope_pose.infer_pose(
+                        color_img, camera_matrix, depth_frame=depth_frame,
+                    )
                 except Exception as e:
-                    print(f"[DopePose] infer_keypoints9 error: {e}")
-                    kps9 = None
-                if kps9 is not None:
+                    print(f"[DopePose] infer_pose error: {e}")
+                    dope_result = None
+                last_dope_ms = (time.perf_counter() - _dope_t0) * 1000.0
+                dope_fps_window.append(last_dope_ms)
+                # confirmed AND gate_passed 인 경우에만 FSM 으로 ψ/d_lat/d_fwd 전달
+                # (한 번 보고 눈 감기 — gate 실패는 시각화만, FSM 으로 안 보냄)
+                if (dope_result is not None
+                        and dope_result.get("confirmed")
+                        and dope_result.get("gate_passed")
+                        and dope_result.get("R") is not None):
                     try:
-                        result6d = keypoints9_to_align_vars(kps9, camera_matrix, dist_coeffs=None)
+                        psi_pallet_deg, d_lateral_m, d_forward_m = pose6d_to_align_vars(
+                            dope_result["R"], dope_result["t_m"],
+                        )
                     except Exception as e:
-                        print(f"[Pose6D] keypoints9_to_align_vars error: {e}")
-                        result6d = None
-                    if result6d is not None:
-                        psi_pallet_deg, d_lateral_m, d_forward_m = result6d
+                        print(f"[Pose6D] pose6d_to_align_vars error: {e}")
+                        psi_pallet_deg, d_lateral_m, d_forward_m = None, None, None
 
-            # 3) 시각화
-            if bbox_now is not None:
-                x1, y1, x2, y2 = bbox_now
-                cv2.rectangle(vis, (x1, y1), (x2, y2), COLOR_BOX, 2)
-            if mask_bin is not None:
-                mask_vis = (mask_bin * 255).astype(np.uint8)
-                cnts, _ = cv2.findContours(mask_vis, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                cv2.drawContours(vis, cnts, -1, COLOR_CNT, 2)
+            # 3) 시각화 — YOLO bbox/contour 는 USE_PERCEPTION_YOLO 일 때만
+            if perception is not None:
+                if bbox_now is not None:
+                    x1, y1, x2, y2 = bbox_now
+                    cv2.rectangle(vis, (x1, y1), (x2, y2), COLOR_BOX, 2)
+                if mask_bin is not None:
+                    mask_vis = (mask_bin * 255).astype(np.uint8)
+                    cnts, _ = cv2.findContours(mask_vis, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(vis, cnts, -1, (120, 60, 120), 1)
+                    if len(cnts) > 0:
+                        largest = max(cnts, key=cv2.contourArea)
+                        xs = largest[:, 0, 0]; ys = largest[:, 0, 1]
+                        lx = int(xs.max()); ly = int(ys.min())
+                        cv2.putText(vis, "YOLO_SEG", (lx + 4, ly + 4),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (120, 60, 120), 1)
+            # 화면 중앙 십자 — 카메라 광축 표시
             cv2.drawMarker(vis, (W // 2, H // 2), COLOR_CENTER, markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
+
+            # FPS 측정 (이전 frame 끝 → 현재 frame 시작)
+            _now = time.perf_counter()
+            _dt = _now - last_frame_ts
+            last_frame_ts = _now
+            if _dt > 1e-4:
+                fps_window.append(1.0 / _dt)
+            fps_avg = sum(fps_window) / len(fps_window) if fps_window else 0.0
+            dope_ms_avg = sum(dope_fps_window) / len(dope_fps_window) if dope_fps_window else 0.0
+            infer_fps = 1000.0 / dope_ms_avg if dope_ms_avg > 1e-3 else 0.0
 
             # 4) HUD 텍스트
             lines = []
-            lines.append(("detected" if det_ok else "no detection", COLOR_STATUS_OK if det_ok else COLOR_ALERT))
-            lines.append((f"pts: {len(pts_in) if pts_in is not None else 0}", COLOR_META))
+            # 상단: FPS / DOPE timing — 사용자가 본 옛 화면 (image #24) 스타일
+            lines.append((f"FPS: {fps_avg:.1f}", COLOR_META))
+            lines.append((f"Infer FPS: {infer_fps:.1f}  | DOPE ms: {last_dope_ms:.0f} (avg {dope_ms_avg:.0f})", COLOR_META))
 
-            # yaw(now/smooth): 평면기반
-            if ok_plane and (yaw_smooth is not None) and (yaw_deg is not None):
-                lines.append((f"yaw(now): {fmt_deg(yaw_deg)} deg", COLOR_YAW))
-                lines.append((f"yaw_smooth: {fmt_deg(yaw_smooth)} deg", COLOR_YAW))
-            else:
-                lines.append(("yaw: N/A", COLOR_ALERT))
+            # YOLO + RGB-D RANSAC 관련 라인 — USE_PERCEPTION_YOLO=True 일 때만
+            if perception is not None:
+                lines.append(("detected" if det_ok else "no detection", COLOR_STATUS_OK if det_ok else COLOR_ALERT))
+                lines.append((f"pts: {len(pts_in) if pts_in is not None else 0}", COLOR_META))
 
-            # offset/width
-            if ex is not None and (offset_smooth is not None):
-                lines.append((f"offset_x(now): {fmt_m(ex)} m", COLOR_OFFSET))
-                lines.append((f"offset_smooth: ({fmt_m(offset_smooth[0])}, {fmt_m(offset_smooth[1])}, {fmt_m(offset_smooth[2])})", COLOR_OFFSET))
-            else:
-                lines.append(("offset_smooth: N/A", COLOR_OFFSET))
+                if ok_plane and (yaw_smooth is not None) and (yaw_deg is not None):
+                    lines.append((f"yaw(now): {fmt_deg(yaw_deg)} deg", COLOR_YAW))
+                    lines.append((f"yaw_smooth: {fmt_deg(yaw_smooth)} deg", COLOR_YAW))
+                else:
+                    lines.append(("yaw: N/A", COLOR_ALERT))
 
-            if (width_now is not None) and (width_smooth is not None):
-                lines.append((f"pallet width(now): {width_now:.3f} m", COLOR_WIDTH))
-                lines.append((f"pallet width_smooth: {width_smooth:.3f} m", COLOR_WIDTH))
-            else:
-                lines.append(("pallet width_smooth: N/A", COLOR_WIDTH))
+                if ex is not None and (offset_smooth is not None):
+                    lines.append((f"offset_x(now): {fmt_m(ex)} m", COLOR_OFFSET))
+                    lines.append((f"offset_smooth: ({fmt_m(offset_smooth[0])}, {fmt_m(offset_smooth[1])}, {fmt_m(offset_smooth[2])})", COLOR_OFFSET))
+                else:
+                    lines.append(("offset_smooth: N/A", COLOR_OFFSET))
 
-            if (dist_euclid is not None) and (dist_z is not None):
-                lines.append((f"distance: euclid {dist_euclid:.3f} m | z {dist_z:.3f} m", COLOR_META))
-            else:
-                lines.append(("distance: N/A", COLOR_META))
+                if (width_now is not None) and (width_smooth is not None):
+                    lines.append((f"pallet width(now): {width_now:.3f} m", COLOR_WIDTH))
+                    lines.append((f"pallet width_smooth: {width_smooth:.3f} m", COLOR_WIDTH))
+                else:
+                    lines.append(("pallet width_smooth: N/A", COLOR_WIDTH))
 
-            # === HUD: rel_yaw(gyro-Y)만 표기 (IMU heading(Z-int) 제거) ===
+                if (dist_euclid is not None) and (dist_z is not None):
+                    lines.append((f"distance: euclid {dist_euclid:.3f} m | z {dist_z:.3f} m", COLOR_META))
+                else:
+                    lines.append(("distance: N/A", COLOR_META))
+
+            # === HUD: rel_yaw(gyro-Y) — IMU 회전 누적 (FSM 회전 종료 판정용, 두 모드 공통) ===
             lines.append((f"rel_yaw(gyro-Y): {fmt_deg(rel_yaw)} deg", COLOR_META))
             lines.append((f"|rel_yaw|(gyro-Y): {abs(rel_yaw):6.2f} deg", COLOR_META))
 
-            # === HUD: 6D pose (DOPE) ===
+            # === HUD: 6D pose (DOPE) — 결과 요약 텍스트 ===
+            # 상태:
+            #   CONFIRMED : gate 통과 + N 연속 — FSM 으로 ψ/d_lat/d_fwd 전달
+            #   PENDING   : gate 통과 but consecutive_ok < N
+            #   GATE FAIL : DOPE 추론은 됐지만 gate 실패 — 시각화만, FSM 미전달
+            #   NO DETECT : 추론 결과 자체 없음
             if psi_pallet_deg is not None:
                 lines.append((f"[6D] psi_pallet: {fmt_deg(psi_pallet_deg)} deg", COLOR_YAW))
                 lines.append((f"[6D] d_lateral: {fmt_m(d_lateral_m)} m", COLOR_OFFSET))
                 lines.append((f"[6D] d_forward: {fmt_m(d_forward_m)} m", COLOR_META))
+                lines.append((f"[6D] CONFIRMED", COLOR_STATUS_OK))
             elif dope_pose is not None:
-                lines.append(("[6D] no detection", COLOR_ALERT))
+                if dope_result is not None and dope_result.get("gate_passed") and not dope_result.get("confirmed"):
+                    co = dope_result.get("consecutive_ok", 0)
+                    lines.append((f"[6D] PENDING {co}/{DOPE_CONFIRM_FRAMES}", COLOR_META))
+                elif dope_result is not None and not dope_result.get("gate_passed"):
+                    fr = dope_result.get("info", {}).get("fail_reason", dope_pose.last_reason)
+                    lines.append((f"[6D] GATE FAIL: {fr}", COLOR_ALERT))
+                else:
+                    lines.append((f"[6D] NO DET ({dope_pose.last_reason})", COLOR_ALERT))
 
-            # keypoint overlay (시각화)
-            if kps9 is not None:
-                for i, (u, v) in enumerate(kps9):
-                    if not (np.isnan(u) or np.isnan(v)):
-                        clr = (0, 0, 200) if i == 8 else (0, 200, 0)
-                        cv2.circle(vis, (int(u), int(v)), 4 if i == 8 else 3, clr, 2)
-                        cv2.putText(vis, f"{i}", (int(u) + 5, int(v) - 3),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, clr, 1)
+            # === HUD: gate 진단 — 검출이 있을 때 모든 gate 값 한 줄로 표시 (디버깅) ===
+            # 어느 gate 가 막혔는지 즉시 보임. ✓ / ✗ 마크로 통과/실패.
+            from calib.config import (
+                DOPE_GATE_MIN_KP as _G_MIN_KP,
+                DOPE_GATE_MAX_REPROJ_PX as _G_REPROJ,
+                DOPE_GATE_Z_MIN_M as _G_ZMIN,
+                DOPE_GATE_Z_MAX_M as _G_ZMAX,
+                DOPE_GATE_DEPTH_REL as _G_DREL,
+            )
+            if dope_result is not None:
+                info = dope_result.get("info", {})
+                n_kp = info.get("n_kp", 0)
+                reproj = info.get("reproj")
+                z_m = info.get("z_m")
+                depth_rel = info.get("depth_rel")
+                def _mk(label, val, ok):
+                    return f"{label}={val}{'+' if ok else '!'}"
+                parts = []
+                parts.append(_mk("kp", n_kp, n_kp >= _G_MIN_KP))
+                if reproj is not None:
+                    parts.append(_mk("rep", f"{reproj:.1f}", reproj <= _G_REPROJ))
+                if z_m is not None:
+                    parts.append(_mk("z", f"{z_m:.2f}", _G_ZMIN <= z_m <= _G_ZMAX))
+                if depth_rel is not None:
+                    parts.append(_mk("dRel", f"{depth_rel:.2f}", depth_rel <= _G_DREL))
+                lines.append(("[gate] " + " ".join(parts), COLOR_META))
 
-            # 5) FSM 구동 — rel_yaw + 6D pose 입력 전달
-            #    6D 입력이 있으면 fsm 내부에서 yaw_smooth/offset_smooth 대신 우선 사용된다.
+            # === DOPE HUD 시각화 — 앞면(front face) polygon + 9 keypoint + centroid + yaw arrow ===
+            # 사용자 요구 (image #24 스타일): 미니멀. back face / vertical edges 제거.
+            # gate 실패해도 검출되면 점/arrow 회색으로 표시 (추론 동작 확인 용).
+            if dope_result is not None:
+                raw_orig = dope_result["raw_points_orig"]
+                confirmed = dope_result.get("confirmed", False)
+                gate_passed = dope_result.get("gate_passed", False)
+
+                # 검출되면 항상 동일 색 (image #26 스타일) — gate fail 도 추론 결과는 정상 표시.
+                # FSM 진행 여부는 별개로 confirmed/gate_passed 가 결정.
+                clr_front = (0, 255, 0)      # 선명한 초록
+                clr_kp    = (0, 255, 0)
+                clr_ctr   = (0, 0, 255)      # 빨강 centroid
+                clr_arrow = (0, 255, 255)    # 노랑 yaw arrow
+
+                # front face polygon (0-1-2-3) — 가까운 면, 굵게 강조.
+                # 4 점 다 있으면 closed polygon, 일부 missing 이면 연결 가능한 edge 만.
+                front_edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+                for a, b in front_edges:
+                    if raw_orig[a] is not None and raw_orig[b] is not None:
+                        pa = (int(raw_orig[a][0]), int(raw_orig[a][1]))
+                        pb = (int(raw_orig[b][0]), int(raw_orig[b][1]))
+                        cv2.line(vis, pa, pb, clr_front, 4, cv2.LINE_AA)
+
+                # 9 keypoint + corner index (back face 4~7 도 점만 표시, 선 없음)
+                for i, pt in enumerate(raw_orig):
+                    if pt is None:
+                        continue
+                    px, py = int(pt[0]), int(pt[1])
+                    if i == 8:
+                        # centroid — 강조 빨간 원
+                        cv2.circle(vis, (px, py), 9, clr_ctr, -1)
+                    else:
+                        cv2.circle(vis, (px, py), 6, clr_kp, -1)
+                        cv2.putText(vis, str(i), (px + 5, py - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, clr_kp, 2)
+
+                # yaw arrow — centroid (3D origin) + R[:,2] (entry face normal) 50cm
+                # gate fail 이라도 PnP 가 성공해 R/t 있으면 그림 (회색)
+                R6 = dope_result.get("R")
+                t_m6 = dope_result.get("t_m")
+                if R6 is not None and t_m6 is not None:
+                    try:
+                        rvec, _ = cv2.Rodrigues(R6)
+                        tvec_cm = (np.asarray(t_m6, dtype=np.float64) * 100.0).reshape(3, 1)
+                        f3d = np.array([[0, 0, 0], [0, 0, 50]], dtype=np.float64)
+                        pts_proj, _ = cv2.projectPoints(
+                            f3d, rvec, tvec_cm,
+                            camera_matrix, np.zeros((4, 1), dtype=np.float64),
+                        )
+                        p1 = tuple(pts_proj[0].ravel().astype(int))
+                        p2 = tuple(pts_proj[1].ravel().astype(int))
+                        Hv, Wv = vis.shape[:2]
+                        if (0 <= p1[0] < Wv and 0 <= p1[1] < Hv and
+                                0 <= p2[0] < Wv and 0 <= p2[1] < Hv):
+                            cv2.arrowedLine(vis, p1, p2, clr_arrow, 4, cv2.LINE_AA, tipLength=0.20)
+                            cv2.putText(vis, "+Z(front)", (p2[0] + 8, p2[1] - 8),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, clr_arrow, 2)
+                    except Exception as _e:
+                        pass
+
+                # 상단 배너 — 상태 표시 (CONFIRMED 면 표시 안 함, HUD lines 에 detected (CONFIRMED) 로)
+                if not gate_passed:
+                    info = dope_result.get("info", {})
+                    fr = info.get("fail_reason", "?")
+                    cv2.putText(vis, f"DOPE: GATE FAIL ({fr})", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (140, 140, 220), 2)
+                elif not confirmed:
+                    cv2.putText(vis, f"DOPE: PENDING {dope_result['consecutive_ok']}/{DOPE_CONFIRM_FRAMES}",
+                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 200), 2)
+            elif dope_pose is not None:
+                cv2.putText(vis, f"DOPE: NO DETECTION ({dope_pose.last_reason})", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 220), 2)
+
+            # 5) FSM 구동 — rel_yaw + 6D pose 입력 전달.
+            # YOLO 끈 모드 (perception=None) 에선 fsm.step 의 det_ok / detected_length /
+            # dist_z / yaw_smooth / offset_smooth 가 모두 None → SEARCH 단계 못 빠짐.
+            # DOPE confirmed 일 때 이 값들을 DOPE 결과로 채워서 SEARCH→DETECTED→ALIGN 진행 가능하게.
+            fsm_det_ok = det_ok
+            fsm_width = width_smooth
+            fsm_dist_z = dist_z
+            fsm_yaw_smooth = yaw_smooth
+            fsm_offset_smooth = offset_smooth
+            if perception is None and psi_pallet_deg is not None:
+                fsm_det_ok = True
+                if fsm_width is None:
+                    fsm_width = PALLET_WIDTH_M
+                if fsm_dist_z is None:
+                    fsm_dist_z = d_forward_m
+                if fsm_yaw_smooth is None:
+                    fsm_yaw_smooth = psi_pallet_deg
+                if fsm_offset_smooth is None:
+                    fsm_offset_smooth = np.array(
+                        [d_lateral_m, 0.0, d_forward_m], dtype=np.float32
+                    )
             guide_lines = fsm.step(
-                det_ok=det_ok,
-                detected_length=width_smooth if width_smooth is not None else None,
-                dist_z=dist_z if dist_z is not None else None,
-                yaw_smooth=yaw_smooth if yaw_smooth is not None else None,
-                offset_smooth=offset_smooth if offset_smooth is not None else None,
-                rel_yaw=rel_yaw,  # ★ OFFSET_CHECK 이후 회전 완료 조건 및 진행률에 사용
+                det_ok=fsm_det_ok,
+                detected_length=fsm_width,
+                dist_z=fsm_dist_z,
+                yaw_smooth=fsm_yaw_smooth,
+                offset_smooth=fsm_offset_smooth,
+                rel_yaw=rel_yaw,
                 psi_pallet_deg=psi_pallet_deg,
                 d_lateral_m=d_lateral_m,
                 d_forward_m=d_forward_m,

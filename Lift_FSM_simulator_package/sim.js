@@ -63,6 +63,11 @@ const sim = {
   camera: {
     mountForward: 0.45,
     mountHeight: 0.85,
+    // RealSense D435I 마스트 마운트 tilt (OpenCV camera convention)
+    //   pitch > 0 = down-tilt (광축이 아래로 기울어짐, 일반 마운트)
+    //   roll  > 0 = viewer 기준 시계방향 회전 (보통 0, 미스얼라인 검증용)
+    mountPitchDeg: 10.0,
+    mountRollDeg:  0.0,
     fovHorizontalDeg: 87,
     rangeMin: 0.30,
     rangeMax: 3.5,
@@ -111,8 +116,9 @@ const sim = {
     alignBandM: 0.10,
     lateralBackYawDeg: 85.0, // LATERAL_BACK_YAW_DEG
     yawTurnMinDeg: 1.0,      // YAW_TURN_MIN_DEG
-    insertPocketM: 0.50,           // (deprecated) 새 식은 insertSafetyBackM 사용
-    insertSafetyBackM: 0.10,       // INSERT_SAFETY_BACK_M: fork tip 이 pallet back 에서 띄울 거리 (m)
+    insertPocketM: 0.50,           // (deprecated)
+    insertSafetyBackM: 0.10,       // (deprecated, 옛 fork-tip 기준)
+    insertBodySafetyM: 0.05,       // INSERT_BODY_SAFETY_M: forklift body 가 pallet entry face 에서 띄울 거리 (m)
     // ===== motion_models.py 의 t(d) piecewise 모델 (config.py 파라미터) =====
     // d ≤ d_acc : t = t0 + sqrt(2d/a)
     // d >  d_acc: t = t0 + t1 + (d - d_acc)/vmax
@@ -142,8 +148,9 @@ function bindElements() {
     "statePill", "cmdPill", "simCanvas", "cursorReadout", "runBtn", "stepBtn",
     "resetBtn", "dForward", "dLateral", "psiPallet", "detReadout", "fovReadout",
     "palletX", "palletY", "palletYaw", "palletWidth", "palletDepth", "forkX", "forkY", "forkYaw",
-    "sideShiftToggle", "cameraShowToggle", "moveSpeed", "slowSpeed", "rotSpeed",
-    "standOff", "alignBandM", "lateralBackYawDeg", "insertSafetyBackM",
+    "sideShiftToggle", "cameraShowToggle", "mountPitchDeg", "mountRollDeg",
+    "moveSpeed", "slowSpeed", "rotSpeed",
+    "standOff", "alignBandM", "lateralBackYawDeg", "insertSafetyBackM", "insertBodySafetyM",
     "detNoiseToggle", "detYawStd", "detXStd", "detForwardStd",
     "reprojAccept", "resampleDetectBtn", "latTol", "psiTol",
     "jsonDropZone", "jsonFileInput", "jsonStatus",
@@ -193,6 +200,7 @@ function syncParamsFromInputs() {
   if (el.alignBandM) sim.params.alignBandM = readNumber(el.alignBandM, sim.params.alignBandM);
   if (el.lateralBackYawDeg) sim.params.lateralBackYawDeg = readNumber(el.lateralBackYawDeg, sim.params.lateralBackYawDeg);
   if (el.insertSafetyBackM) sim.params.insertSafetyBackM = readNumber(el.insertSafetyBackM, sim.params.insertSafetyBackM);
+  if (el.insertBodySafetyM) sim.params.insertBodySafetyM = readNumber(el.insertBodySafetyM, sim.params.insertBodySafetyM);
   sim.params.latTol = readNumber(el.latTol, sim.params.latTol);
   sim.params.psiTol = readNumber(el.psiTol, sim.params.psiTol);
   sim.params.reprojAccept = readNumber(el.reprojAccept, sim.params.reprojAccept);
@@ -202,6 +210,8 @@ function syncParamsFromInputs() {
   sim.params.detXStd = readNumber(el.detXStd, sim.params.detXStd);
   sim.params.detForwardStd = readNumber(el.detForwardStd, sim.params.detForwardStd);
   sim.camera.show = el.cameraShowToggle.checked;
+  if (el.mountPitchDeg) sim.camera.mountPitchDeg = readNumber(el.mountPitchDeg, sim.camera.mountPitchDeg);
+  if (el.mountRollDeg)  sim.camera.mountRollDeg  = readNumber(el.mountRollDeg,  sim.camera.mountRollDeg);
 }
 
 function readNumber(input, fallback) {
@@ -223,9 +233,10 @@ function wireEvents() {
 
   [
     el.moveSpeed, el.slowSpeed, el.rotSpeed, el.standOff,
-    el.alignBandM, el.lateralBackYawDeg, el.insertSafetyBackM,
+    el.alignBandM, el.lateralBackYawDeg, el.insertSafetyBackM, el.insertBodySafetyM,
     el.latTol, el.psiTol, el.reprojAccept,
     el.sideShiftToggle, el.cameraShowToggle,
+    el.mountPitchDeg, el.mountRollDeg,
     el.detNoiseToggle, el.detYawStd, el.detXStd, el.detForwardStd
   ].forEach((input) => {
     if (!input) return;
@@ -601,11 +612,24 @@ function cameraWorldPose() {
   const yaw = sim.fork.yaw;
   const c = Math.cos(yaw * DEG);
   const s = Math.sin(yaw * DEG);
-  const R_wc = [
+  // base: yaw 만 반영한 perfect forward-down 카메라 (perfect horizontal-forward)
+  const R_wc_base = [
     [ s,  0,  c],
     [-c,  0,  s],
     [ 0, -1,  0],
   ];
+  // body-frame tilt: R_tilt = R_z(roll) · R_x(pitch) (OpenCV camera frame)
+  //   R_x(pitch) — pitch>0 → 광축이 아래로 (down-tilt)
+  //   R_z(roll)  — roll>0  → viewer 기준 시계방향 회전
+  // 마운트 적용: R_wc_final = R_wc_base · R_tilt (camera body 자체의 회전이라 right-multiply)
+  const p = sim.camera.mountPitchDeg * DEG;
+  const r = sim.camera.mountRollDeg  * DEG;
+  const cp = Math.cos(p), sp = Math.sin(p);
+  const cr = Math.cos(r), sr = Math.sin(r);
+  const Rx = [[1,0,0],[0,cp,-sp],[0,sp,cp]];
+  const Rz = [[cr,-sr,0],[sr,cr,0],[0,0,1]];
+  const R_tilt = matMul3(Rz, Rx);
+  const R_wc   = matMul3(R_wc_base, R_tilt);
   const cam = cameraPosition();
   const t_wc = [cam.x, cam.y, sim.camera.mountHeight];
   return { R: R_wc, t: t_wc };
@@ -654,7 +678,12 @@ function dopeStylePsi() {
   if (psi_deg === -180.0) psi_deg = 180.0;
   const pallet = controlPallet();
   const offset = pallet.depth / 2.0;
-  const d_lat = t[0] + R[0][2] * offset;
+  // DOPE camera frame: +X = camera right. align.py 의 d_lat 분기 식
+  //   (mermaid: d_lat > tol → LATERAL_ROTATE_LEFT, d_lat < -tol → LATERAL_ROTATE_RIGHT)
+  // 은 "forklift 가 pallet 의 우측 → 좌측 보정" 의도를 반영한다고 보면 부호가
+  // 반전되어야 align.py 분기와 일치. 2026-05-27 실차 사용자 검증: forklift 가
+  // 반대 방향 LATERAL chain 진입하던 문제 → 부호 반전으로 fix.
+  const d_lat = -(t[0] + R[0][2] * offset);
   const d_fwd = t[2] + R[2][2] * offset;
   return { psi: psi_deg, dLat: d_lat, dFwd: d_fwd, R, t };
 }
@@ -997,19 +1026,22 @@ function stepLateralChain(dt) {
 
 function stepReadyToInsert() {
   command("STOP");
-  // 마지막 snapshot 의 d_forward (fork center → entry face) 로 InsertPlan compute.
-  // fork tip 기준: 종료 시 fork tip 이 pallet 안쪽 (depth - safetyBack) 위치 — back face 에서 safetyBack m 띄움.
-  // 전진 거리 (fork center 이동량) = dForward - forkCenterToTip + (palletDepth - safetyBack)
+  // body forward edge (forklift mast/fork carriage 의 전면) 가 pallet entry face
+  // 에서 INSERT_BODY_SAFETY_M 만큼 떨어지는 곳까지 전진. 실제 forklift mast 가
+  // pallet 정면에 부딪히지 않도록 보호.
+  // bodyFrontOffset = fork center → body forward edge = centerToP - frontY
+  //   centerToP = 0.72m, frontY (drawForklift) = 0.05m → bodyFrontOffset = 0.67m
+  // 종료 시 fork tip = body + forkLen = entry face + (forkLen - bodySafety) = 안쪽 1.00m
+  //   pallet depth 1.30m 의 77% 침투, back face 까지 0.30m. 안전.
   const snap = sim.fsm.snapshot || { dForward: sim.pose.dForward };
-  const tipOffset = sim.fork.centerToP + sim.fork.forkLen;  // fork center → fork tip (m)
-  const tipTargetInto = Math.max(0, sim.pallet.depth - sim.params.insertSafetyBackM);
-  const total = Math.max(0, snap.dForward - tipOffset + tipTargetInto);
-  // align.py _fwd_sec_for_insertion: total/INSERT_FWD_MPS, clamp [INS_FWD_MIN_SEC, INS_FWD_MAX_SEC].
+  const bodyFrontOffset = sim.fork.centerToP - 0.05;   // fork center → body forward edge (m)
+  const bodySafety = sim.params.insertBodySafetyM ?? 0.05;
+  const total = Math.max(0, snap.dForward - bodyFrontOffset - bodySafety);
   const sec = Math.max(sim.params.fwdMinSec, Math.min(sim.params.fwdMaxSec,
     total / Math.max(0.01, sim.params.slowSpeed)));
   sim.fsm.insertPlan = { fwdSec: sec, deadlineTs: null };
   enterState("INSERT");
-  log(`[READY_TO_INSERT→INSERT] dFwd=${snap.dForward.toFixed(3)} - tipOff=${tipOffset.toFixed(2)} + tipInto=${tipTargetInto.toFixed(2)} (back margin ${sim.params.insertSafetyBackM.toFixed(2)}) → t=${sec.toFixed(2)}s`);
+  log(`[READY_TO_INSERT→INSERT] dFwd=${snap.dForward.toFixed(3)} - bodyOff=${bodyFrontOffset.toFixed(2)} - bodySafety=${bodySafety.toFixed(2)} → t=${sec.toFixed(2)}s`);
 }
 
 function stepInsert(dt) {
@@ -1135,7 +1167,7 @@ function renderUi() {
   const detTag = sim.detection.source === "json" ? "JSON" : "noise";
   const acceptTag = sim.detection.accepted ? "OK" : (sim.detection.inFov ? "REJ" : "FOV");
   el.detReadout.textContent = `${detTag}/${acceptTag} yaw ${sim.detection.yawError.toFixed(2)} / x ${sim.detection.xOffsetError.toFixed(3)} / fwd ${sim.detection.forwardError.toFixed(3)} / reproj ${sim.detection.reprojError.toFixed(2)} px`;
-  el.fovReadout.textContent = `${sim.detection.inFov ? "in FOV" : "out of FOV"} (${sim.camera.fovHorizontalDeg} deg, ${sim.camera.rangeMin}-${sim.camera.rangeMax} m)`;
+  el.fovReadout.textContent = `${sim.detection.inFov ? "in FOV" : "out of FOV"} (${sim.camera.fovHorizontalDeg} deg, ${sim.camera.rangeMin}-${sim.camera.rangeMax} m, pitch ${sim.camera.mountPitchDeg.toFixed(1)}° roll ${sim.camera.mountRollDeg.toFixed(1)}°)`;
   el.logBox.innerHTML = sim.fsm.log.map((line) => `<div>${escapeHtml(line)}</div>`).join("");
 
   document.querySelectorAll("#fsmList li").forEach((li) => {
@@ -1175,6 +1207,7 @@ const FSM_ALIGN_LEVELS = [
   ["OFFSET_CHECK"],
   ["DIST_CHECK"],
   ["ALIGN_FWD_ADJUST", "ALIGN_BWD_ADJUST"],
+  ["OFFSET_NEED_CORRECT"],
   ["LATERAL_ROTATE_RIGHT", "LATERAL_ROTATE_LEFT"],
   ["FORWARD_AFTER_RIGHT", "FORWARD_AFTER_LEFT"],
   ["LATERAL_ROTATE_LEFT_BACK", "LATERAL_ROTATE_RIGHT_BACK"],
@@ -1187,6 +1220,7 @@ const FSM_NODE_LABEL = {
   "YAW_CORRECT_LEFT":  "YAW_CORR_L",
   "ALIGN_FWD_ADJUST":  "FWD_ADJ",
   "ALIGN_BWD_ADJUST":  "BWD_ADJ",
+  "OFFSET_NEED_CORRECT":       "OFF_NEED_CORR",
   "LATERAL_ROTATE_RIGHT":      "LAT_ROT_R",
   "LATERAL_ROTATE_LEFT":       "LAT_ROT_L",
   "FORWARD_AFTER_RIGHT":       "FWD_AFT_R",
@@ -1276,35 +1310,33 @@ function drawFsmDiagram() {
   ctx.fillText("Calibration FSM (Snapshot Model)", W / 2, 22 * dpr);
 
   // 레이아웃 상수 (canvas 폭에 맞춰 노드 크기 적응)
+  // mermaid spec: 좌측 column = SEARCH, 가운데 = ALIGN composite, 우측 column = INSERT/DONE
   const PAD = 12 * dpr;
   const TITLE_H = 36 * dpr;
   const GROUP_PAD = 10 * dpr;
-  const COL_GAP = 12 * dpr;
-  const ROW_GAP = 10 * dpr;
+  const COL_GAP = 10 * dpr;
   const LEVEL_GAP = 14 * dpr;
-  const outerW = (W - 2 * PAD - COL_GAP) * 0.28;
-  const alignW = (W - 2 * PAD - COL_GAP) - outerW;
-  const xOuter = PAD;
-  const xAlign = xOuter + outerW + COL_GAP;
+  const totalInnerW = W - 2 * PAD - 2 * COL_GAP;
+  const leftW  = totalInnerW * 0.16;
+  const rightW = totalInnerW * 0.16;
+  const alignW = totalInnerW - leftW - rightW;
+  const xLeft  = PAD;
+  const xAlign = xLeft + leftW + COL_GAP;
+  const xRight = xAlign + alignW + COL_GAP;
   const topY = TITLE_H;
-  // 노드 크기: ALIGN 칼럼 최대 2열에 맞춤
   const alignInnerW = alignW - 2 * GROUP_PAD;
   const nodeW = Math.min(160 * dpr, (alignInnerW - COL_GAP) / 2);
   const nodeH = 26 * dpr;
-  const outerInnerW = outerW - 2 * GROUP_PAD;
-  const outerNodeW = Math.min(nodeW, outerInnerW);
+  const sideNodeW = Math.min(nodeW, Math.min(leftW, rightW) - 4 * dpr);
 
-  // ALIGN sub 레이아웃
+  // 레이아웃
   const POS = {};
   const startY = topY + GROUP_PAD + 22 * dpr;
-  // OUTER
-  let yo = startY;
-  for (const name of FSM_OUTER_NODES) {
-    const x = xOuter + GROUP_PAD + (outerInnerW - outerNodeW) / 2;
-    POS[name] = { x, y: yo, w: outerNodeW, h: nodeH };
-    yo += nodeH + LEVEL_GAP;
-  }
-  // ALIGN
+
+  // 좌측 column — SEARCH (vertically centered with ALIGN)
+  // 우측 column — INSERT (위), DONE (아래)
+  // ALIGN 먼저 배치하여 box height 산출 후 좌/우 vertical 정렬.
+
   let ya = startY;
   for (const level of FSM_ALIGN_LEVELS) {
     const cols = level.length;
@@ -1316,7 +1348,30 @@ function drawFsmDiagram() {
     }
     ya += nodeH + LEVEL_GAP;
   }
-  const gyEnd = Math.max(yo, ya) + GROUP_PAD;
+  const alignBoxBottom = ya - LEVEL_GAP + GROUP_PAD;   // ALIGN 박스 아래 가장자리
+  const alignBoxTop = topY;
+  const alignBoxH = alignBoxBottom - alignBoxTop;
+
+  // 좌측: SEARCH 노드 — ALIGN 박스 수직 중앙에 배치
+  const cxLeft = xLeft + (leftW - sideNodeW) / 2;
+  const ySearch = alignBoxTop + alignBoxH / 2 - nodeH / 2;
+  POS["SEARCH"] = { x: cxLeft, y: ySearch, w: sideNodeW, h: nodeH };
+
+  // 우측: INSERT (위), DONE (아래) — ALIGN 박스 수직 균등 배치
+  const cxRight = xRight + (rightW - sideNodeW) / 2;
+  const yInsert = alignBoxTop + alignBoxH * 0.40 - nodeH / 2;
+  const yDone   = alignBoxTop + alignBoxH * 0.60 - nodeH / 2;
+  POS["INSERT"] = { x: cxRight, y: yInsert, w: sideNodeW, h: nodeH };
+  POS["DONE"]   = { x: cxRight, y: yDone,   w: sideNodeW, h: nodeH };
+
+  // ALIGN 노드 ("OUTER" 상태의 ALIGN top-level) 는 mermaid 처럼 좌측 외부에 별도
+  // 노드로 두지 않고, ALIGN composite 박스 자체가 그 역할을 함.
+  // 다만 FSM_OUTER_NODES 안의 "ALIGN" 도 active 인식 위해 좌측 column 아래 작은
+  // 영역에 배치 (활성 표시용).
+  const yAlignLabel = alignBoxTop + alignBoxH * 0.30 - nodeH / 2;
+  POS["ALIGN"] = { x: cxLeft, y: yAlignLabel, w: sideNodeW, h: nodeH };
+
+  const gyEnd = Math.max(alignBoxBottom, yDone + nodeH + GROUP_PAD);
 
   // active 매핑
   const dm = mapSimStateToDiagram();
@@ -1324,20 +1379,19 @@ function drawFsmDiagram() {
   const activeSub = dm.sub;
   const inAlignGroup = (activeOuter === "ALIGN" || activeOuter === "INSERT");
 
-  // 그룹 박스
-  const drawGroup = (gx, gw, title, active) => {
+  // 그룹 박스 — ALIGN composite 만
+  const drawGroup = (gx, gw, gy_top, gy_bot, title, active) => {
     ctx.fillStyle = GROUP_BG;
-    ctx.fillRect(gx, topY, gw, gyEnd - topY);
+    ctx.fillRect(gx, gy_top, gw, gy_bot - gy_top);
     ctx.strokeStyle = active ? GROUP_ACTIVE : GROUP_BORDER;
     ctx.lineWidth = 2 * dpr;
-    ctx.strokeRect(gx, topY, gw, gyEnd - topY);
+    ctx.strokeRect(gx, gy_top, gw, gy_bot - gy_top);
     ctx.fillStyle = TEXT_TITLE;
     ctx.font = `bold ${Math.round(13 * dpr)}px Arial`;
     ctx.textAlign = "center";
-    ctx.fillText(title, gx + gw / 2, topY + 16 * dpr);
+    ctx.fillText(title, gx + gw / 2, gy_top + 16 * dpr);
   };
-  drawGroup(xOuter, outerW, "OUTER", true);
-  drawGroup(xAlign, alignW, "ALIGN", inAlignGroup);
+  drawGroup(xAlign, alignW, alignBoxTop, alignBoxBottom, "ALIGN", inAlignGroup);
 
   // 엣지
   ctx.strokeStyle = EDGE_COLOR;
@@ -1508,7 +1562,9 @@ function drawCameraFov(ctx) {
   const camPos = cameraPosition();
   const heading = sim.fork.yaw;
   const half = sim.camera.fovHorizontalDeg / 2 * DEG;
-  const rng = sim.camera.rangeMax;
+  // pitch down-tilt 이면 ground plane 에 projected effective range 가 cos(pitch) 만큼 줄어듦
+  const pitchRad = (sim.camera.mountPitchDeg ?? 0) * DEG;
+  const rng = sim.camera.rangeMax * Math.cos(Math.max(0, pitchRad));
   const headingRad = heading * DEG;
   const a0 = headingRad - half;
   const a1 = headingRad + half;

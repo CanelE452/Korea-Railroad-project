@@ -12,12 +12,36 @@ CONF_THR = 0.30  # 세그멘테이션/디텍션 confidence threshold
 # fsm.step 의 6D 입력 kwargs (psi_pallet_deg, d_lateral_m, d_forward_m) 로 전달한다.
 # False 면 기존 RGB-D RANSAC perception 만 사용.
 USE_6D_MODE = True
+# True 면 YOLO segmentation (perception_yolo) + RGB-D RANSAC plane fit 도 추가로 동작
+# (DOPE 검출 실패 시 fallback 또는 시각화 비교 용도). False (default) 면 DOPE 만.
+# DOPE 만 쓰는 환경에선 False — YOLO 모델 로드 시간/메모리 절약 + HUD 가 깔끔.
+USE_PERCEPTION_YOLO = False
 MODEL_PATH_6D = 'C:/Users/minjae/Documents/github/FoundationPose/challenge/model/challengenight.pth'
 # DOPE 입력 height (run_live.py 와 동일하게 400). VGG stride 호환 위해 width 는 자동 정렬.
 DOPE_INPUT_HEIGHT = 400
 # belief map peak confidence 임계 — challenge/config/task.yaml 의 belief.threshold 와 동일.
 DOPE_PEAK_THRESHOLD = 0.30
 DOPE_PEAK_SIGMA = 3.0
+# DOPE detector 의 보조 임계 (challenge/config/task.yaml inference.belief 와 동일).
+DOPE_THRESH_MAP    = 0.30  # affinity grouping 시 영향력 임계
+DOPE_THRESH_POINTS = 0.30  # peak 후보 임계
+DOPE_THRESH_ANGLE  = 0.50  # affinity field cosine 임계
+DOPE_SOFTMAX       = 1000  # affinity softmax temperature
+
+# ===== DOPE sanity gate (challenge/config/task.yaml inference.gates 와 동일) =====
+# PnP 결과를 FSM 으로 보내기 전 통과시켜야 하는 게이트들.
+# snapshot FSM 은 한 번의 캡처가 잘못되면 즉시 잘못된 회전 cmd 가 전송되므로 게이트 필수.
+# 2026-05-28: 시연 모드 — 모든 gate 거의 disable.
+# 학습 데이터 (synthetic Blender + Isaac Sim) 와 실차 카메라의 PnP 정확도 차이로
+# reproj 자체가 16~30px 일관되게 큼. CAN MOCK 모드라 실제 forklift 안 움직이므로
+# 안전. snapshot FSM 의 STOP_SEC=1.2 가 safety net.
+DOPE_GATE_MIN_KP            = 4      # PnP 최소 4점 (SQPNP), 더 풀 수 없음
+DOPE_GATE_MAX_REPROJ_PX     = 50.0   # 사실상 reproj gate disable (실차 16~30px 흡수)
+DOPE_GATE_Z_MIN_M           = 0.10   # close-range 시연 (0.3m 이하 OK)
+DOPE_GATE_Z_MAX_M           = 8.00   # 멀어도 OK
+DOPE_GATE_DEPTH_REL         = 1.00   # depth_rel 사실상 disable
+DOPE_GATE_EDGE_RATIO_TOL    = 1.50   # edge_ratio 사실상 disable
+DOPE_CONFIRM_FRAMES         = 1      # 즉시 confirmed
 
 # ===== 연산 디바이스 / 정밀도 =====
 # CUDA가 사용 가능하고 USE_GPU=True면 'cuda:{CUDA_DEVICE}'로 동작.
@@ -78,14 +102,22 @@ PALLET_HEIGHT_M = 0.12
 
 # ===== 포크 hardware 측정 (forklift 자체 spec) =====
 # fork center → fork tip 까지 거리 (m). centerToP + forkLen.
-# INSERT 단계에서 fork tip 이 pallet 안쪽 어디까지 들어갈지 계산하는 데 사용.
 FORK_CENTER_TO_TIP_M = 1.77   # 0.72 (center→P) + 1.05 (P→tip) = 1.77
 
+# fork center → forklift body forward edge (mast / fork carriage 의 전면) 까지 거리 (m).
+# centerToP - (forklift body 의 P 점 기준 frontY offset).
+# 실제 forklift 의 mast 위치 측정값으로 조정. 기본값은 sim.js 의 frontY=0.05 와 일치.
+FORK_CENTER_TO_BODY_FRONT_M = 0.67   # 0.72 (center→P) - 0.05 (P→body front) = 0.67
+
 # ===== INSERT 안전 margin =====
-# fork tip 이 pallet back face 에서 띄울 최소 거리 (m).
-# 종료 시 fork tip 위치 = entry face + (PALLET_DEPTH_M - INSERT_SAFETY_BACK_M)
-# = back face 보다 INSERT_SAFETY_BACK_M 만큼 앞.
+# (deprecated) fork tip 이 pallet back face 에서 띄울 거리. 옛 fork-tip 기준 식.
 INSERT_SAFETY_BACK_M = 0.10
+
+# forklift body forward edge (mast/carriage 전면) 가 pallet entry face 에서 띄울
+# 최소 거리 (m). 종료 시 body 가 entry face 의 INSERT_BODY_SAFETY_M 앞에 멈춤
+# (mast 가 pallet 정면에 부딪히지 않도록). fork tip 은 자연히 안쪽 forkLen 만큼
+# 들어가 pallet 의 ~85% 침투, back face 까지 충분한 여유.
+INSERT_BODY_SAFETY_M = 0.05
 
 # ===== 정렬 완료 판정 안정화 =====
 CMD_STABLE_THR = 5     # 같은 판정이 연속 n프레임 유지돼야 상태 전이

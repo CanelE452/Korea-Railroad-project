@@ -64,28 +64,28 @@ def _fwd_sec_for_distance(dist_m: float) -> float:
 
 
 def _fwd_sec_for_insertion(dist_z: Optional[float]) -> Optional[float]:
-    """파렛트 포켓 삽입용 전진 시간 — fork tip 기준 + safety margin.
+    """파렛트 포켓 삽입용 전진 시간 — forklift body forward edge 기준 + safety margin.
 
     dist_z 는 fork center → pallet entry face 까지 거리 (snapshot 값).
-    종료 시 fork tip 이 pallet 안쪽 (PALLET_DEPTH_M - INSERT_SAFETY_BACK_M) 위치.
+    종료 시 forklift body forward edge (mast/fork carriage 전면) 가 pallet entry
+    face 의 INSERT_BODY_SAFETY_M 앞에 멈춤. mast 가 pallet 정면 충돌 회피.
+    fork tip 은 자연히 entry face 안쪽 forkLen 만큼 들어가 pallet 의 ~85% 침투.
 
     전진 거리 (fork center 이동량):
-        total = dist_z - FORK_CENTER_TO_TIP_M + (PALLET_DEPTH_M - INSERT_SAFETY_BACK_M)
+        total = dist_z - FORK_CENTER_TO_BODY_FRONT_M - INSERT_BODY_SAFETY_M
 
-    config 의 FORK_CENTER_TO_TIP_M / PALLET_DEPTH_M / INSERT_SAFETY_BACK_M /
+    config 의 FORK_CENTER_TO_BODY_FRONT_M / INSERT_BODY_SAFETY_M /
     INSERT_FWD_MPS / INS_FWD_{MIN,MAX}_SEC 사용.
     """
     if dist_z is None:
         return None
-    tip_offset    = float(getattr(cfg, "FORK_CENTER_TO_TIP_M", 1.77))
-    pallet_depth  = float(getattr(cfg, "PALLET_DEPTH_M", 1.30))
-    safety_back   = float(getattr(cfg, "INSERT_SAFETY_BACK_M", 0.10))
+    body_offset   = float(getattr(cfg, "FORK_CENTER_TO_BODY_FRONT_M", 0.67))
+    body_safety   = float(getattr(cfg, "INSERT_BODY_SAFETY_M", 0.05))
     v_mps         = float(getattr(cfg, "INSERT_FWD_MPS", 0.25))
     t_min         = float(getattr(cfg, "INS_FWD_MIN_SEC", 0.5))
     t_max         = float(getattr(cfg, "INS_FWD_MAX_SEC", 10.0))
 
-    tip_target_into = max(0.0, pallet_depth - safety_back)
-    total = max(0.0, float(dist_z) - tip_offset + tip_target_into)
+    total = max(0.0, float(dist_z) - body_offset - body_safety)
     v = max(1e-3, v_mps)
     sec = total / v
     return max(t_min, min(t_max, sec))

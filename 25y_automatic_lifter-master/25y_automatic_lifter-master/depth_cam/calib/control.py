@@ -12,13 +12,14 @@
 from __future__ import annotations
 from typing import Optional, Dict
 from dataclasses import dataclass
+import os
 import threading
 import time
 
 # Kvaser CANlib — DLL (canlib32.dll) 부재 시 자동 mock fallback.
 # Kvaser SDK 가 설치된 머신 (사용자 운영 환경) 에서는 정상 import.
 # SDK 없는 개발 머신 (CI / 검증용) 에서는 mock 으로 떨어져 main_rec.py 의
-# import 단계까지 통과시킴 (실제 CAN 송수신은 [MOCK SEND] 로 대체).
+# import 및 init 단계 모두 통과 (실제 CAN 송수신은 silent skip).
 try:
     from canlib import canlib, Frame  # Kvaser CANlib
     _CANLIB_DLL_OK = True
@@ -38,10 +39,21 @@ except (ImportError, FileNotFoundError, OSError) as _e:
         def write(self, frame): pass
         def read(self, *a, **k): raise _MockCanlibError("mock: no frame")
 
+    class _MockBitrate:
+        """Kvaser canlib.Bitrate 인터페이스 모킹 (canlib 미설치 환경에서 can_init 통과용)."""
+        BITRATE_1M   = -1
+        BITRATE_500K = -2
+        BITRATE_250K = -3
+        BITRATE_125K = -4
+        BITRATE_100K = -5
+        BITRATE_62K  = -6
+        BITRATE_50K  = -7
+
     class _MockCanlib:
         canERR_NOTFOUND = -3
         canOPEN_ACCEPT_VIRTUAL = 0
         canBITRATE_500K = -2
+        Bitrate = _MockBitrate
         Driver = type("Driver", (), {"NORMAL": 4})()
         canERR_NOMSG = _MockCanlibError
 
@@ -62,11 +74,22 @@ except (ImportError, FileNotFoundError, OSError) as _e:
             self.dlc = dlc
             self.flags = flags
 
+# Mock send 의 [MOCK SEND] 로그 toggle. 기본 OFF (조용히 동작).
+# 디버깅 시 PowerShell: $env:CAN_MOCK_VERBOSE=1 / bash: CAN_MOCK_VERBOSE=1
+_MOCK_VERBOSE = os.environ.get("CAN_MOCK_VERBOSE", "0") == "1"
+
+
+def is_mock() -> bool:
+    """현재 CAN 통신이 mock (canlib DLL 없음) 인지 반환."""
+    return not _CANLIB_DLL_OK
+
+
 __all__ = [
     "can_init", "can_close", "start_heartbeat", "stop_heartbeat", "send_heartbeat",
     "issue_command_forward", "issue_command_backward",
     "issue_command_forward_and_turn", "issue_command_backward_and_turn",
     "issue_command_rotate_in_place", "issue_command_stop",
+    "is_mock",
 ]
 
 # =============================================================================
@@ -163,7 +186,8 @@ def _next_sync() -> int:
 
 def _write(frame: Frame):
     if _CTX.ch is None:
-        print(f"[MOCK SEND] id=0x{frame.id:03X}, data={[hex(b) for b in frame.data]}, flags={'EXT' if _CTX.is_extended else 'STD'}")
+        if _MOCK_VERBOSE:
+            print(f"[MOCK SEND] id=0x{frame.id:03X}, data={[hex(b) for b in frame.data]}, flags={'EXT' if _CTX.is_extended else 'STD'}")
         return
     with _CTX.tx_lock:
         _CTX.ch.write(frame)
