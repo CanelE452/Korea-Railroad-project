@@ -53,6 +53,8 @@ pydantic_core==2.33.2
 Pygments==2.19.2
 pyparsing==3.2.3
 pyrealsense2==2.56.5.9235
+pyrr>=0.10.3
+# pyrr 가 multipledispatch 의존성 자동 설치
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 python-engineio==4.12.2
