@@ -1,5 +1,6 @@
 # main_rec.py (실행 즉시 자동 녹화 시작 버전: 첫 프레임 생성 시 VideoWriter 자동 초기화)
 
+import argparse
 import sys
 import time
 import cv2
@@ -40,6 +41,17 @@ def setup_video_writer_filename():
     os.makedirs(rec_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return os.path.join(rec_dir, f"forklift_recording_{ts}.mp4")
+
+
+def setup_video_writer_filenames():
+    """HUD + raw 두 파일명 페어 반환 (동일 timestamp 로 세션 페어링)."""
+    rec_dir = "./rec"
+    os.makedirs(rec_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (
+        os.path.join(rec_dir, f"forklift_recording_{ts}.mp4"),  # HUD + FSM diagram
+        os.path.join(rec_dir, f"forklift_raw_{ts}.mp4"),         # raw color (학습용)
+    )
 
 
 def realsense_check_or_exit():
@@ -140,6 +152,15 @@ class RelYawEstimator:
 
 
 def main():
+    # CLI: --no-raw 면 학습용 raw color 녹화 비활성. default = HUD + raw 둘 다 녹화.
+    ap = argparse.ArgumentParser(
+        description="Forklift main_rec — RealSense + DOPE 6D + FSM (default: HUD + raw 둘 다 녹화)",
+    )
+    ap.add_argument("--no-raw", action="store_true",
+                    help="학습용 raw color 녹화 비활성 (default: 활성)")
+    args = ap.parse_args()
+    record_raw = not args.no_raw
+
     realsense_check_or_exit()
 
     # CAN 초기화 — canlib DLL 없는 환경은 mock 으로 silent 동작 (실제 송수신 없음)
@@ -208,10 +229,16 @@ def main():
     align = rs.align(rs.stream.color)
 
     # === 녹화: 실행 즉시 자동 녹화 시작 ===
-    video_filename = setup_video_writer_filename()
+    # HUD (FSM diagram 포함) + raw color 두 파일 (페어 timestamp). --no-raw 면 HUD 만.
+    video_filename, raw_filename = setup_video_writer_filenames()
     video_writer = None
+    raw_video_writer = None
     recording = True              # ← 기본값: True (자동 녹화)
-    print(f"📹 자동 녹화 대기: {video_filename} (첫 프레임 생성 시 시작)")
+    print(f"📹 자동 녹화 대기 (HUD): {video_filename}")
+    if record_raw:
+        print(f"📹 자동 녹화 대기 (raw 학습용): {raw_filename}")
+    else:
+        print(f"📹 raw 녹화 비활성 (--no-raw)")
     print("📹 'r' 녹화 토글, 'ESC' 종료")
 
     # EMA 상태
@@ -623,20 +650,31 @@ def main():
                 diag = cv2.resize(diag, (diag.shape[1], vis.shape[0]), interpolation=cv2.INTER_AREA)
             show = cv2.hconcat([vis, diag])
 
-            # ★ 자동 녹화: 첫 show가 준비되면 즉시 VideoWriter 초기화
+            # ★ 자동 녹화: 첫 show 가 준비되면 VideoWriter 초기화 (HUD + raw)
             if recording and video_writer is None:
                 h, w = show.shape[:2]
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 video_writer = cv2.VideoWriter(video_filename, fourcc, 15.0, (w, h))
                 if video_writer.isOpened():
-                    print(f"🔴 녹화 시작: {video_filename}")
+                    print(f"🔴 녹화 시작 (HUD): {video_filename}")
                 else:
-                    print("❌ VideoWriter 초기화 실패")
+                    print("❌ HUD VideoWriter 초기화 실패")
                     recording = False
                     video_writer = None
+            if recording and record_raw and raw_video_writer is None:
+                rh, rw = color_img.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                raw_video_writer = cv2.VideoWriter(raw_filename, fourcc, 15.0, (rw, rh))
+                if raw_video_writer.isOpened():
+                    print(f"🔴 녹화 시작 (raw): {raw_filename}")
+                else:
+                    print("❌ raw VideoWriter 초기화 실패 (HUD 녹화는 계속)")
+                    raw_video_writer = None
 
-            # 8) 녹화 표시/쓰기
+            # 8) 녹화 표시/쓰기 — HUD 에는 REC 라벨 추가, raw 는 깨끗하게 저장
             if recording:
+                if record_raw and raw_video_writer is not None:
+                    raw_video_writer.write(color_img)   # raw 는 REC 라벨 없이 (학습용)
                 cv2.putText(show, "REC", (show.shape[1]-80, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
                 if video_writer is not None:
@@ -656,7 +694,13 @@ def main():
         try:
             if video_writer is not None:
                 video_writer.release()
-                print(f"✅ 비디오 저장 완료: {video_filename}")
+                print(f"✅ HUD 저장 완료: {video_filename}")
+        except Exception:
+            pass
+        try:
+            if raw_video_writer is not None:
+                raw_video_writer.release()
+                print(f"✅ raw 저장 완료: {raw_filename}")
         except Exception:
             pass
         try:
