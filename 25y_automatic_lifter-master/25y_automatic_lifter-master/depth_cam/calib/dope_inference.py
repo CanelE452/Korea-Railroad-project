@@ -266,6 +266,36 @@ class DopePoseEstimator:
             self.net = net
             self.model = None
 
+        # Half precision (FP16) — GPU 일 때만. config.USE_HALF=True 가 default.
+        # FP16 추론은 RTX 3060 Laptop 같은 모바일 GPU 에서 FP32 대비 5~10x 빠름.
+        try:
+            from calib.config import USE_HALF as _USE_HALF
+        except ImportError:
+            _USE_HALF = True
+        if self.device.startswith("cuda") and _USE_HALF:
+            self.net.half()
+            print(f"[DopePose] half precision : True (FP16)")
+        else:
+            print(f"[DopePose] half precision : False (FP32, device={self.device})")
+
+        # Warmup forward — 첫 추론의 lazy compile / cuDNN benchmark 비용을 init 으로 분산.
+        # 두 번째 frame 부터 정상 추론 속도.
+        try:
+            ref_param = next(self.net.parameters())
+            dummy_h = int(input_height)
+            dummy_w = (int(input_height * 4 / 3) // 8) * 8   # 4:3 비율 대략 (RealSense 640x480 → 533)
+            dummy = torch.zeros(
+                1, 3, dummy_h, dummy_w,
+                device=ref_param.device, dtype=ref_param.dtype,
+            )
+            with torch.no_grad():
+                _ = self.net(dummy)
+            if self.device.startswith("cuda"):
+                torch.cuda.synchronize()
+            print(f"[DopePose] warmup done ({dummy_h}x{dummy_w})")
+        except Exception as e:
+            print(f"[DopePose] warmup skipped: {e}")
+
         # CuboidPNPSolver — Cuboid3d size 는 cm 단위 (location 도 cm 반환)
         dim_cm = [pallet_width_m * 100.0, pallet_height_m * 100.0, pallet_depth_m * 100.0]
         self.pnp_solver = CuboidPNPSolver("pallet", cuboid3d=Cuboid3d(dim_cm))
@@ -286,13 +316,17 @@ class DopePoseEstimator:
         self.last_reason: str = "init"
 
     def _forward(self, img_rgb_np: np.ndarray):
-        """RGB(H,W,3,uint8) → (vertex2, aff) — 마지막 stage tensor."""
+        """RGB(H,W,3,uint8) → (vertex2, aff) — 마지막 stage tensor.
+
+        net 이 FP16 (half precision) 일 때 forward 는 FP16 으로 수행하되,
+        반환 tensor 는 FP32 로 cast (ObjectDetector 의 numpy 처리가 fp16 미지원).
+        """
         t = _IMAGENET_TF(img_rgb_np)
         ref = next(self.net.parameters())
         t = t.to(device=ref.device, dtype=ref.dtype).unsqueeze(0)
         with torch.no_grad():
             out, seg = self.net(t)
-        return out[-1][0], seg[-1][0]
+        return out[-1][0].float(), seg[-1][0].float()
 
     # ------------------------------------------------------------------ public
     def infer_pose(
