@@ -1,6 +1,15 @@
 # calib/config.py
 # 공통 설정 / 상수 / 색상 팔레트 (FSM 다이어그램 및 main_rec.py 실행 흐름 기준)
 
+from pathlib import Path as _Path
+import os as _os
+
+# config.py 가 위치한 디렉토리부터 repo root 까지 자동 계산 — 어느 PC 에서나 동작.
+# parents: [0]=calib, [1]=depth_cam, [2]=25y_automatic_lifter-master(inner),
+#          [3]=25y_automatic_lifter-master(outer), [4]=FoundationPose (repo root)
+_CONFIG_DIR = _Path(__file__).resolve().parent
+_REPO_ROOT = _CONFIG_DIR.parents[3]
+
 # ===== 모델 & 감지 =====
 MODEL_PATH = 'runs/segment/y11n_seg_finetune/weights/last.pt'  # 실제 가중치 경로에 맞춰 확인 필요
 FRONT_CLASS_NAME = "front"
@@ -16,7 +25,12 @@ USE_6D_MODE = True
 # (DOPE 검출 실패 시 fallback 또는 시각화 비교 용도). False (default) 면 DOPE 만.
 # DOPE 만 쓰는 환경에선 False — YOLO 모델 로드 시간/메모리 절약 + HUD 가 깔끔.
 USE_PERCEPTION_YOLO = False
-MODEL_PATH_6D = 'C:/Users/minjae/Documents/github/FoundationPose/challenge/model/challengenight.pth'
+# DOPE 가중치 경로 — __file__ 기반 자동 계산 (모든 PC 에서 동작).
+# 환경변수 MODEL_PATH_6D 로 override 가능 (HuggingFace 등 다른 위치 사용 시).
+MODEL_PATH_6D = _os.environ.get(
+    "MODEL_PATH_6D",
+    str(_REPO_ROOT / "challenge" / "model" / "challengenight.pth"),
+)
 # DOPE 입력 height (run_live.py 와 동일하게 400). VGG stride 호환 위해 width 는 자동 정렬.
 DOPE_INPUT_HEIGHT = 400
 # belief map peak confidence 임계 — challenge/config/task.yaml 의 belief.threshold 와 동일.
