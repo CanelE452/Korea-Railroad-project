@@ -18,7 +18,8 @@ run_used.yml
 # Large data / recordings / model weights (no images in repo)
 challenge/data/
 challenge/weights/
-challenge/model/
+challenge/model/*
+!challenge/model/README.md
 depth_cam/rec/
 depth_cam/runs/
 
