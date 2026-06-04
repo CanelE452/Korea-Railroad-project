@@ -1,0 +1,22 @@
+# YOLO26n-pose fine-tune (manual GT 219, 비패딩) — B 실험
+#
+# A(data_manual_padded.yaml)와 1:1 비교용. 유일한 차이 = padding 유무.
+#   train : challenge/data/yolo_pose_manual/images/train  (219 frame, 640×480 원본, --pad 0)
+#   val   : challenge/data/yolo_pose/images/val           (1,416 합성 holdout, A와 동일)
+#
+# 의도:
+#   - padding 없이 원본 학습. truncation 코너(전체 kp의 9.0%, 66/219 frame)는
+#     visibility=0 으로 pose loss 마스킹 → 모델은 보이는 코너만 회귀.
+#   - Ultralytics 내장 aug(mosaic/scale/translate)가 truncation 을 자동 합성하므로
+#     원본만으로도 robust. inference 도 원본 입력 → de-pad 불필요.
+#   - PnP 는 6점 이상이면 성립 → 잘린 코너 버려도 6D 복원 가능.
+
+train: /home/minjae/Documents/github/pallet-pose/challenge/data/yolo_pose_manual/images/train
+val: /home/minjae/Documents/github/pallet-pose/challenge/data/yolo_pose/images/val
+
+nc: 1
+names:
+  0: pallet
+
+kpt_shape: [9, 3]
+flip_idx: [1, 0, 3, 2, 5, 4, 7, 6, 8]

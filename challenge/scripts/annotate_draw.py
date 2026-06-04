@@ -45,36 +45,66 @@ CUBOID_EDGES = [
 
 PANEL_W = 280  # 우측 키 안내 패널 폭
 
+# ─── Letterbox margin ─────────────────────────────────────────────────────────
+# 캡처 이미지(640x480) 밖으로 projection 되는 keypoint/cuboid 코너(특히 화면 하단의
+# far-bottom 6/7) 가 image 경계를 넘어가 안 보이는 문제 해결용 여백.
+# 확장 캔버스 = margin(어두운 회색) + 원본 이미지를 (MARGIN_L, MARGIN_T) 위치에 배치.
+# 캔버스 좌표 = image 좌표 + (MARGIN_L, MARGIN_T).  아래쪽(MARGIN_B)을 더 넉넉히.
+MARGIN_L = 200
+MARGIN_R = 200
+MARGIN_T = 200
+MARGIN_B = 320
+MARGIN_BG = 40  # 여백 색 (어두운 회색)
+
+
+def make_canvas(img):
+    """원본 image 를 margin 으로 둘러싼 확장 캔버스 생성.
+    반환 캔버스의 (MARGIN_L, MARGIN_T) 위치에 원본 image 가 들어간다.
+    image 좌표 (u, v) → 캔버스 좌표 (u + MARGIN_L, v + MARGIN_T)."""
+    h, w = img.shape[:2]
+    cw = w + MARGIN_L + MARGIN_R
+    ch = h + MARGIN_T + MARGIN_B
+    canvas = np.full((ch, cw, 3), MARGIN_BG, dtype=np.uint8)
+    canvas[MARGIN_T:MARGIN_T + h, MARGIN_L:MARGIN_L + w] = img
+    # 원본 image 영역 경계선 (여백과 구분)
+    cv2.rectangle(canvas, (MARGIN_L - 1, MARGIN_T - 1),
+                  (MARGIN_L + w, MARGIN_T + h), (90, 90, 90), 1)
+    return canvas
+
 
 def draw_line_input(img, line_pts, mouse_xy, zoom, pan):
-    """진행 중인 TWO-LINE input 을 image 위에 그린다."""
+    """진행 중인 TWO-LINE input 을 확장 캔버스 위에 그린다.
+    line_pts/mouse 는 image 좌표 → 캔버스 좌표로 offset 후 그림."""
     if not line_pts:
         if mouse_xy is not None:
+            # mouse_xy 는 screen 좌표 → 캔버스 좌표 (zoom/pan 역변환).
             mu = (mouse_xy[0] / zoom) + pan[0]
             mv = (mouse_xy[1] / zoom) + pan[1]
             cv2.drawMarker(img, (int(mu), int(mv)), (0, 255, 255),
                            cv2.MARKER_CROSS, 14, 1)
         return
+    # line_pts 는 image 좌표 → 캔버스 좌표로 offset.
+    def cxy(p):
+        return (int(p[0] + MARGIN_L), int(p[1] + MARGIN_T))
     colors = [(0, 255, 255), (0, 255, 255), (0, 200, 255), (0, 200, 255)]
     for i, p in enumerate(line_pts):
-        cv2.circle(img, (int(p[0]), int(p[1])), 4, colors[i], -1)
+        cx, cy = cxy(p)
+        cv2.circle(img, (cx, cy), 4, colors[i], -1)
         cv2.putText(img, f"L{i//2+1}-{['A','B'][i%2]}",
-                    (int(p[0]) + 6, int(p[1]) - 6),
+                    (cx + 6, cy - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, colors[i], 1)
     if len(line_pts) >= 2:
-        cv2.line(img, (int(line_pts[0][0]), int(line_pts[0][1])),
-                       (int(line_pts[1][0]), int(line_pts[1][1])),
+        cv2.line(img, cxy(line_pts[0]), cxy(line_pts[1]),
                        (0, 255, 255), 2, cv2.LINE_AA)
     if len(line_pts) >= 4:
-        cv2.line(img, (int(line_pts[2][0]), int(line_pts[2][1])),
-                       (int(line_pts[3][0]), int(line_pts[3][1])),
+        cv2.line(img, cxy(line_pts[2]), cxy(line_pts[3]),
                        (0, 200, 255), 2, cv2.LINE_AA)
     if mouse_xy is not None and len(line_pts) in (1, 3):
+        # mouse_xy 는 screen 좌표 → 캔버스 좌표 (zoom/pan 역변환).
         mu = (mouse_xy[0] / zoom) + pan[0]
         mv = (mouse_xy[1] / zoom) + pan[1]
         col = (0, 255, 255) if len(line_pts) == 1 else (0, 200, 255)
-        last = line_pts[-1]
-        cv2.line(img, (int(last[0]), int(last[1])), (int(mu), int(mv)),
+        cv2.line(img, cxy(line_pts[-1]), (int(mu), int(mv)),
                  col, 1, cv2.LINE_AA)
 
 
@@ -88,11 +118,14 @@ def draw_overlay(img, kps_2d, active_idx, pose=None, extrap_mask=None):
     v7: extrap_mask 가 주어지면 외삽 점은 outlined (속 빈 원) 으로 표시 →
     직접 click 과 시각 구분.
     """
-    vis = img.copy()
+    # 확장 캔버스 (margin) 에 그린다 — image 밖으로 나간 코너도 여백에 표시됨.
+    # 모든 점: 캔버스 좌표 = image 좌표 + (MARGIN_L, MARGIN_T).
+    vis = make_canvas(img)
     if pose is not None:
         proj = pose["projected_all"]
         # v7: project_3d sentinel = (-1, -1) — 그 외 음수 u/v 는 valid (image 밖).
-        pts = [(int(p[0]), int(p[1])) if not (p[0] == -1.0 and p[1] == -1.0)
+        pts = [(int(p[0] + MARGIN_L), int(p[1] + MARGIN_T))
+               if not (p[0] == -1.0 and p[1] == -1.0)
                else None for p in proj[:8]]
         for k, (a, b) in enumerate(CUBOID_EDGES):
             if pts[a] and pts[b]:
@@ -102,7 +135,7 @@ def draw_overlay(img, kps_2d, active_idx, pose=None, extrap_mask=None):
     for i, p in enumerate(kps_2d):
         if p is None:
             continue
-        c = (int(p[0]), int(p[1]))
+        c = (int(p[0] + MARGIN_L), int(p[1] + MARGIN_T))
         r = 7 if i == active_idx else 5
         is_extrap = (extrap_mask is not None and i < len(extrap_mask)
                      and extrap_mask[i])

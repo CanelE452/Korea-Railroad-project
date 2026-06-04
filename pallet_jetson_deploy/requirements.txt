@@ -1,0 +1,6 @@
+# Jetson(JetPack)에는 torch / tensorrt / cuDNN 이 이미 설치돼 있다고 가정.
+# (JetPack 미포함 시 NVIDIA 제공 Jetson용 torch wheel 별도 설치)
+# 아래만 pip 설치:
+ultralytics
+opencv-python
+numpy

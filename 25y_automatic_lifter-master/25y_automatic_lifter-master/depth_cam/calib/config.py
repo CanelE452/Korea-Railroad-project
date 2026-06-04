@@ -21,16 +21,42 @@ CONF_THR = 0.30  # 세그멘테이션/디텍션 confidence threshold
 # fsm.step 의 6D 입력 kwargs (psi_pallet_deg, d_lateral_m, d_forward_m) 로 전달한다.
 # False 면 기존 RGB-D RANSAC perception 만 사용.
 USE_6D_MODE = True
+# 6D pose backend 선택: "dope" (기본) 또는 "yolo" (YOLO26-pose + SQPnP).
+# 둘 다 동일한 infer_pose() → pose6d_to_align_vars() 경로를 쓰므로 FSM 은 동일하게 동작.
+# 환경변수 POSE_BACKEND 로 override 가능.
+POSE_BACKEND = _os.environ.get("POSE_BACKEND", "dope").lower()
+# YOLO backend 가중치 (.pt / .onnx / .engine). 환경변수 MODEL_PATH_6D_YOLO 로 override.
+# .engine 사용 시 LD_LIBRARY_PATH 에 torch/lib + tensorrt_libs 추가 필요.
+MODEL_PATH_6D_YOLO = _os.environ.get(
+    "MODEL_PATH_6D_YOLO",
+    str(_REPO_ROOT / "pallet_jetson_deploy" / "models" / "pallet_pose_cropaug_v2.pt"),
+)
 # True 면 YOLO segmentation (perception_yolo) + RGB-D RANSAC plane fit 도 추가로 동작
 # (DOPE 검출 실패 시 fallback 또는 시각화 비교 용도). False (default) 면 DOPE 만.
 # DOPE 만 쓰는 환경에선 False — YOLO 모델 로드 시간/메모리 절약 + HUD 가 깔끔.
 USE_PERCEPTION_YOLO = False
-# DOPE 가중치 경로 — __file__ 기반 자동 계산 (모든 PC 에서 동작).
+# DOPE 가중치 경로 — challenge/model/ 안의 .pth 를 파일명 상관없이 자동 탐색.
 # 환경변수 MODEL_PATH_6D 로 override 가능 (HuggingFace 등 다른 위치 사용 시).
-MODEL_PATH_6D = _os.environ.get(
-    "MODEL_PATH_6D",
-    str(_REPO_ROOT / "challenge" / "model" / "challengenight.pth"),
-)
+def _resolve_model_path_6d():
+    """challenge/model/ 폴더의 .pth 를 이름 상관없이 자동 선택.
+    우선순위: ① 환경변수 MODEL_PATH_6D → ② 폴더 내 유일 .pth →
+              ③ 여러 개면 challengenight.pth 우선(기존 호환), 없으면 이름순 첫 .pth."""
+    env = _os.environ.get("MODEL_PATH_6D")
+    if env:
+        return env
+    model_dir = _REPO_ROOT / "challenge" / "model"
+    pths = sorted(model_dir.glob("*.pth")) if model_dir.is_dir() else []
+    if not pths:
+        # 폴더 비었으면 기존 기본 경로 반환 (런타임 load 시 명확한 에러)
+        return str(model_dir / "challengenight.pth")
+    if len(pths) == 1:
+        return str(pths[0])
+    for p in pths:
+        if p.name == "challengenight.pth":
+            return str(p)
+    return str(pths[0])
+
+MODEL_PATH_6D = _resolve_model_path_6d()
 # DOPE 입력 height (run_live.py 와 동일하게 400). VGG stride 호환 위해 width 는 자동 정렬.
 DOPE_INPUT_HEIGHT = 400
 # belief map peak confidence 임계 — challenge/config/task.yaml 의 belief.threshold 와 동일.
@@ -49,13 +75,27 @@ DOPE_SOFTMAX       = 1000  # affinity softmax temperature
 # 학습 데이터 (synthetic Blender + Isaac Sim) 와 실차 카메라의 PnP 정확도 차이로
 # reproj 자체가 16~30px 일관되게 큼. CAN MOCK 모드라 실제 forklift 안 움직이므로
 # 안전. snapshot FSM 의 STOP_SEC=1.2 가 safety net.
-DOPE_GATE_MIN_KP            = 4      # PnP 최소 4점 (SQPNP), 더 풀 수 없음
-DOPE_GATE_MAX_REPROJ_PX     = 50.0   # 사실상 reproj gate disable (실차 16~30px 흡수)
-DOPE_GATE_Z_MIN_M           = 0.10   # close-range 시연 (0.3m 이하 OK)
-DOPE_GATE_Z_MAX_M           = 8.00   # 멀어도 OK
-DOPE_GATE_DEPTH_REL         = 1.00   # depth_rel 사실상 disable
-DOPE_GATE_EDGE_RATIO_TOL    = 1.50   # edge_ratio 사실상 disable
-DOPE_CONFIRM_FRAMES         = 1      # 즉시 confirmed
+# GATE_PROFILE = "demo" (기본, 현재 시연값 그대로 — 회귀 없음) | "real" (실삽입용 강화).
+# 실제 리프터가 포크를 끼우기 전(real)에는 나쁜 프레임이 포크 오작동을 일으키지
+# 않도록 게이트를 다시 조인다. 환경변수 GATE_PROFILE 로 선택. 값은 rig 에서 튜닝 시작점.
+GATE_PROFILE = _os.environ.get("GATE_PROFILE", "demo").lower()
+
+if GATE_PROFILE == "real":
+    DOPE_GATE_MIN_KP            = 6      # 신뢰 가능한 PnP 위해 6점 이상
+    DOPE_GATE_MAX_REPROJ_PX     = 12.0   # reproj 큰(부정확) pose 거부
+    DOPE_GATE_Z_MIN_M           = 0.30
+    DOPE_GATE_Z_MAX_M           = 6.00
+    DOPE_GATE_DEPTH_REL         = 0.25   # PnP z vs RealSense depth 괴리 크면 거부 (gross fail catch)
+    DOPE_GATE_EDGE_RATIO_TOL    = 0.40
+    DOPE_CONFIRM_FRAMES         = 3      # N 연속 통과해야 FSM 으로 (안정성)
+else:  # "demo"
+    DOPE_GATE_MIN_KP            = 4      # PnP 최소 4점 (SQPNP), 더 풀 수 없음
+    DOPE_GATE_MAX_REPROJ_PX     = 50.0   # 사실상 reproj gate disable (실차 16~30px 흡수)
+    DOPE_GATE_Z_MIN_M           = 0.10   # close-range 시연 (0.3m 이하 OK)
+    DOPE_GATE_Z_MAX_M           = 8.00   # 멀어도 OK
+    DOPE_GATE_DEPTH_REL         = 1.00   # depth_rel 사실상 disable
+    DOPE_GATE_EDGE_RATIO_TOL    = 1.50   # edge_ratio 사실상 disable
+    DOPE_CONFIRM_FRAMES         = 1      # 즉시 confirmed
 
 # ===== 연산 디바이스 / 정밀도 =====
 # CUDA가 사용 가능하고 USE_GPU=True면 'cuda:{CUDA_DEVICE}'로 동작.
@@ -113,6 +153,19 @@ ALIGN_BAND_M = 0.30    # 허용 밴드 (±m)
 PALLET_WIDTH_M  = 1.10
 PALLET_DEPTH_M  = 1.30
 PALLET_HEIGHT_M = 0.12
+
+# ===== 카메라 → 포크(차량) frame 고정 extrinsic =====
+# 카메라가 포크 중심에 없으므로 pose 는 camera frame. 포크 frame 으로 옮기는 고정
+# 변환. ⚠ 실측 전이라 placeholder = 항등 (오프셋 0, 회전 0) → 현재 동작과 동일.
+#   CAM_TO_FORK_T       : [x, y, z] (m) camera origin → fork origin 오프셋.
+#   CAM_TO_FORK_RPY_DEG : [roll, pitch, yaw] (deg) camera axes → fork axes 회전.
+# 실측 후 아래 값을 채울 것 (OpenCV X右 Y下 Z前 convention 유지).
+CAM_TO_FORK_T       = [0.0, 0.0, 0.0]   # m
+CAM_TO_FORK_RPY_DEG = [0.0, 0.0, 0.0]   # deg
+
+# centroid 픽셀 depth scale 보정 유효 거리 (m). 이 범위 밖 depth 는 무시.
+DEPTH_CORRECT_Z_MIN_M = 0.10
+DEPTH_CORRECT_Z_MAX_M = 12.0
 
 # ===== 포크 hardware 측정 (forklift 자체 spec) =====
 # fork center → fork tip 까지 거리 (m). centerToP + forkLen.

@@ -48,7 +48,7 @@ import sys
 import cv2
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "self_training"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "self_training"))
 from pnp_solver import make_pallet_keypoints_3d_isaac
 
 

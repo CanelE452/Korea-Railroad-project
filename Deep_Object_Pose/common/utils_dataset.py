@@ -9,8 +9,10 @@ AddNoise              : tensor Gaussian noise augmentation
 import io
 import json
 import os
+import random
 
 import albumentations as A
+import cv2
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -59,6 +61,192 @@ class AddNoise(object):
         return t
 
 
+# =============================================================================
+# On-the-fly truncation augmentation
+# -----------------------------------------------------------------------------
+# Ports the verified offline pipeline
+#   challenge/scripts/gen_truncation_crops.py  (crop+resize 640x480, L/R side bias)
+#   challenge/scripts/pad_truncation_crops.py  (reflect-pad off-image kps back in)
+# into a single in-memory transform applied to the *original* image + 9 keypoints
+# BEFORE the loader's albumentations pipeline. The result is a 640x480 frame whose
+# pallet is clipped at an edge but whose every corner sits inside the
+# [MARGIN_FRAC, 1-MARGIN_FRAC] band (so CreateBeliefMap at output_size=50/sigma=4
+# supervises all 9 channels, even truncated corners).
+#
+# convention: projected_cuboid order (camera-facing v4) is NEVER reordered here;
+# crop/pad are pure affine (per-point shift+scale), so the 9-point order is
+# preserved identically to the offline scripts.
+# =============================================================================
+_TRUNC_W, _TRUNC_H = 640, 480
+_TRUNC_ASPECT = _TRUNC_W / _TRUNC_H  # 4:3
+_TRUNC_MARGIN_FRAC = 0.20  # must match pad_truncation_crops.py (>= 2*sigma/50=0.16)
+
+# Cut-side sampling weights (forklift pans L/R -> mostly side clipping; top almost
+# excluded). Mirrors gen_truncation_crops.CUT_WEIGHTS exactly.
+_TRUNC_CUT_WEIGHTS = {
+    "L": 0.275, "R": 0.275,
+    "B": 0.15, "BL": 0.075, "BR": 0.075,
+    "T": 0.02, "TL": 0.015, "TR": 0.015,
+}
+_TRUNC_SIDES = list(_TRUNC_CUT_WEIGHTS.keys())
+_TRUNC_SIDE_W = list(_TRUNC_CUT_WEIGHTS.values())
+
+# Degenerate-rejection thresholds (after crop+resize), mirrors gen script.
+_TRUNC_MIN_IN_IMAGE = 5
+_TRUNC_MIN_VIS_AREA = _TRUNC_W * _TRUNC_H * 0.10
+_TRUNC_MIN_VIS_DIM = 50.0
+_TRUNC_DEEP_RATIO = 0.3
+_TRUNC_MAX_TRIES = 40
+
+
+def _trunc_extent(kps):
+    """Bounding box over all 9 keypoints (off-image coords included)."""
+    pts = np.asarray(kps, dtype=np.float64)
+    return pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max()
+
+
+def _trunc_make_window(extent, img_w, img_h, side, f, rng):
+    """4:3 crop window (source pixels) clipping the pallet on `side` by frac f.
+    Direct port of gen_truncation_crops.make_crop_window."""
+    px0, py0, px1, py1 = extent
+    pw = max(px1 - px0, 1.0)
+    ph = max(py1 - py0, 1.0)
+    margin_x = pw * rng.uniform(0.05, 0.20)
+    margin_y = ph * rng.uniform(0.05, 0.20)
+    L, R, T, B = px0 - margin_x, px1 + margin_x, py0 - margin_y, py1 + margin_y
+    if "L" in side:
+        L = px0 + f * pw
+    if "R" in side:
+        R = px1 - f * pw
+    if "T" in side:
+        T = py0 + f * ph
+    if "B" in side:
+        B = py1 - f * ph
+    L = max(0.0, L); T = max(0.0, T)
+    R = min(float(img_w), R); B = min(float(img_h), B)
+    cw, ch = R - L, B - T
+    if cw < 20 or ch < 20:
+        return None
+    if cw / ch > _TRUNC_ASPECT:
+        need_h = cw / _TRUNC_ASPECT
+        grow = need_h - ch
+        gt = grow * (0.0 if "T" in side else (1.0 if "B" in side else 0.5))
+        T -= gt; B += grow - gt
+    else:
+        need_w = ch * _TRUNC_ASPECT
+        grow = need_w - cw
+        gl = grow * (0.0 if "L" in side else (1.0 if "R" in side else 0.5))
+        L -= gl; R += grow - gl
+    if L < 0:
+        R += -L; L = 0.0
+    if T < 0:
+        B += -T; T = 0.0
+    if R > img_w:
+        L -= (R - img_w); R = float(img_w)
+    if B > img_h:
+        T -= (B - img_h); B = float(img_h)
+    L = max(0.0, L); T = max(0.0, T)
+    R = min(float(img_w), R); B = min(float(img_h), B)
+    cw, ch = R - L, B - T
+    if cw < 20 or ch < 20:
+        return None
+    return L, T, cw, ch
+
+
+def _trunc_transform_kps(kps, win):
+    cx0, cy0, cw, ch = win
+    sx, sy = _TRUNC_W / cw, _TRUNC_H / ch
+    out = np.asarray(kps, dtype=np.float64).copy()
+    out[:, 0] = (out[:, 0] - cx0) * sx
+    out[:, 1] = (out[:, 1] - cy0) * sy
+    return out
+
+
+def _trunc_visible_bbox(kps):
+    pts = [p for p in kps if 0 <= p[0] < _TRUNC_W and 0 <= p[1] < _TRUNC_H]
+    if not pts:
+        return 0.0, 0.0, 0.0
+    pts = np.asarray(pts, dtype=np.float64)
+    w = pts[:, 0].max() - pts[:, 0].min()
+    h = pts[:, 1].max() - pts[:, 1].min()
+    return w, h, w * h
+
+
+def _trunc_required_pad(kps):
+    """Smallest symmetric pad so every kp lands in the margin band after
+    pad+resize-back to 640x480. Direct port of pad_truncation_crops.required_pad."""
+    pts = np.asarray(kps, dtype=np.float64)
+    xmin, xmax = pts[:, 0].min(), pts[:, 0].max()
+    ymin, ymax = pts[:, 1].min(), pts[:, 1].max()
+    mx, my = _TRUNC_MARGIN_FRAC * _TRUNC_W, _TRUNC_MARGIN_FRAC * _TRUNC_H
+
+    def fits(P):
+        dw, dh = _TRUNC_W + 2 * P, _TRUNC_H + 2 * P
+        sx, sy = _TRUNC_W / dw, _TRUNC_H / dh
+        return ((xmin + P) * sx >= mx and (xmax + P) * sx <= _TRUNC_W - mx
+                and (ymin + P) * sy >= my and (ymax + P) * sy <= _TRUNC_H - my)
+
+    if fits(0):
+        return 0
+    P = 1
+    while not fits(P) and P < 5000:
+        P += max(1, P // 8)
+    lo = max(0, P - max(1, P // 8))
+    for q in range(lo, P + 1):
+        if fits(q):
+            return q
+    return P
+
+
+def _trunc_pad_back(img, kps):
+    pad = _trunc_required_pad(kps)
+    if pad <= 0:
+        return img, np.asarray(kps, dtype=np.float64)
+    padded = cv2.copyMakeBorder(img, pad, pad, pad, pad, cv2.BORDER_REFLECT_101)
+    ph, pw = padded.shape[:2]
+    out_img = cv2.resize(padded, (_TRUNC_W, _TRUNC_H), interpolation=cv2.INTER_LINEAR)
+    sx, sy = _TRUNC_W / pw, _TRUNC_H / ph
+    out = np.asarray(kps, dtype=np.float64).copy()
+    out[:, 0] = (out[:, 0] + pad) * sx
+    out[:, 1] = (out[:, 1] + pad) * sy
+    return out_img, out
+
+
+def apply_truncation_aug(img, kps9, rng):
+    """img (HxWx3 uint8 RGB), kps9 (9,2). Returns (out_img 480x640x3, out_kps9)
+    with the pallet truncated at a frame edge and all 9 corners padded inside the
+    [0.20,0.80] band, or None if no valid variant after retries.
+
+    rng: a random.Random instance (worker/epoch-seeded for per-call variety)."""
+    img_h, img_w = img.shape[:2]
+    extent = _trunc_extent(kps9)
+    for _ in range(_TRUNC_MAX_TRIES):
+        side = rng.choices(_TRUNC_SIDES, weights=_TRUNC_SIDE_W, k=1)[0]
+        deep = rng.random() < _TRUNC_DEEP_RATIO
+        f = rng.uniform(0.35, 0.55) if deep else rng.uniform(0.10, 0.30)
+        win = _trunc_make_window(extent, img_w, img_h, side, f, rng)
+        if win is None:
+            continue
+        cx0, cy0, cw, ch = win
+        crop_img = img[int(round(cy0)):int(round(cy0 + ch)),
+                       int(round(cx0)):int(round(cx0 + cw))]
+        if crop_img.size == 0:
+            continue
+        crop_img = cv2.resize(crop_img, (_TRUNC_W, _TRUNC_H),
+                              interpolation=cv2.INTER_LINEAR)
+        kps_c = _trunc_transform_kps(kps9, win)
+        in_cnt = int(np.sum([(0 <= p[0] < _TRUNC_W and 0 <= p[1] < _TRUNC_H)
+                             for p in kps_c]))
+        if in_cnt < _TRUNC_MIN_IN_IMAGE:
+            continue
+        vw, vh, varea = _trunc_visible_bbox(kps_c)
+        if varea < _TRUNC_MIN_VIS_AREA or min(vw, vh) < _TRUNC_MIN_VIS_DIM:
+            continue
+        out_img, out_kps = _trunc_pad_back(crop_img, kps_c)
+        return out_img, out_kps
+    return None
+
+
 class CleanVisiiDopeLoader(data.Dataset):
     """NDDS PNG + JSON pair 메인 dataset.
     - Albumentations 로 RandomCrop + Rotate + 색조 augmentation 적용
@@ -90,13 +278,18 @@ class CleanVisiiDopeLoader(data.Dataset):
 
     def __init__(self, path_dataset, objects=None, sigma=1, output_size=400,
                  extensions=["png"], debug=False,
-                 use_s3=False, buckets=[], endpoint_url=None):
+                 use_s3=False, buckets=[], endpoint_url=None,
+                 truncation_aug_prob=0.0):
         self.path_dataset = path_dataset
         self.objects_interest = list(map(str.lower, objects))
         self.sigma = sigma
         self.output_size = output_size
         self.extensions = append_dot(extensions)
         self.debug = debug
+        # On-the-fly truncation augmentation probability (0.0 = off, backward
+        # compatible). Each sample is truncation-cropped+padded with this prob,
+        # else it follows the original clean path.
+        self.truncation_aug_prob = float(truncation_aug_prob)
 
         self.imgs = []
         self.s3_buckets = {}
@@ -126,6 +319,9 @@ class CleanVisiiDopeLoader(data.Dataset):
                 self.imgs += loadimages(path_look, extensions=self.extensions)
 
         print("Number of Training Images:", len(self.imgs))
+        if self.truncation_aug_prob > 0:
+            print(f"[TRUNC-AUG] on-the-fly truncation augmentation enabled "
+                  f"(prob={self.truncation_aug_prob})")
 
         if debug:
             print("Debuging will be save in debug/")
@@ -179,6 +375,31 @@ class CleanVisiiDopeLoader(data.Dataset):
         img, data_json, img_name = self._load_raw(index)
         all_projected_cuboid_keypoints = self._collect_keypoints(data_json)
 
+        # ---- On-the-fly truncation augmentation -----------------------------
+        # Applied on the ORIGINAL image (640x480 etc.) BEFORE albumentations,
+        # because the ported gen/pad logic operates in original-pixel space.
+        # Only single-object frames (DOPE pallet pretrain) are eligible; a valid
+        # 9-kp set is required. On success the frame becomes 640x480 with all 9
+        # corners inside the [0.20,0.80] band.
+        applied_truncation = False
+        if (self.truncation_aug_prob > 0
+                and len(all_projected_cuboid_keypoints) == 1):
+            # per-call rng: mix worker seed (epoch reseeds via base_seed) with
+            # the sample index so each (epoch, worker, sample) draws differently.
+            winfo = data.get_worker_info()
+            base = winfo.seed if winfo is not None else random.randint(0, 2**31)
+            rng = random.Random((int(base) ^ (index * 2654435761)) & 0xFFFFFFFF)
+            if rng.random() < self.truncation_aug_prob:
+                kps9 = np.array(all_projected_cuboid_keypoints[0], dtype=np.float64)
+                # skip invisible/sentinel placeholder frames
+                if kps9.shape == (9, 2) and not np.all(kps9 < 0):
+                    res = apply_truncation_aug(img, kps9, rng)
+                    if res is not None:
+                        out_img, out_kps = res
+                        img = out_img
+                        all_projected_cuboid_keypoints[0] = out_kps.tolist()
+                        applied_truncation = True
+
         # flatten for albumentations
         flatten_projected_cuboid = []
         for obj in all_projected_cuboid_keypoints:
@@ -195,9 +416,17 @@ class CleanVisiiDopeLoader(data.Dataset):
             img_to_save.save(f"debug/{img_name.replace('.png','_original.png')}")
 
         # data augmentation (Albumentations)
+        # For truncation samples we must NOT RandomCrop (it would re-clip the
+        # already-truncated pallet and drop the padded-in corners). Instead we
+        # Resize 640x480 -> 400x400, preserving all 9 corners inside the band.
+        # Note: Resize to a square 400x400 changes aspect (640x480 -> 1:1), the
+        # same anisotropic scaling A.Resize applies; belief targets are built
+        # from the transformed keypoints so they stay consistent.
+        spatial_op = (A.Resize(width=400, height=400) if applied_truncation
+                      else A.RandomCrop(width=400, height=400))
         transform = A.Compose(
             [
-                A.RandomCrop(width=400, height=400),
+                spatial_op,
                 A.Rotate(limit=180),
                 A.RandomBrightnessContrast(brightness_limit=0.35, contrast_limit=0.2, p=1),
                 A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=20,

@@ -1,9 +1,23 @@
 """Phase 5: 합성 검증셋에서 DOPE 추론 + 6D pose 종합 평가.
 
+ORDER-FREE 평가 (2026-06-03 수정):
+  과거 버전은 예측 keypoint index i 를 GT projected_cuboid index i 와 그대로
+  비교했는데, 모델 학습 convention (camera-facing v4) 과 합성 GT 의 corner 순서
+  (Isaac annotate 순서) 가 달라 same-index 비교가 항상 깨졌다 (reproj 130px+,
+  PCK 과소평가). corner *위치* 는 맞고 *label/순서* 만 다른 문제 (same-idx 118px
+  vs best-match 17px). 본 버전은 cuboid 의 48 corner automorphism (topology 보존
+  relabeling) 중 GT 2D 와 가장 잘 맞는 permutation 을 골라 정합한 뒤 메트릭을
+  계산한다. centroid(idx 8) 는 고정. 자유 Hungarian 이 아니라 cube 위상을
+  보존하는 permutation 만 허용하므로 메트릭 의미가 왜곡되지 않는다.
+
+  cuboid dims = 1.1 x 1.3 x 0.11 (GT self-consistency 최선값, PnP reproj 5px).
+
 메트릭:
-  - PCK@3px, PCK@5px, PCK@10px (belief map 해상도)
-  - PnP success rate + 2D Reproj error (mean px)
+  - PCK@3px, PCK@5px, PCK@10px (order-free, belief map 해상도)
+  - PnP success rate + 2D Reproj error (order-free)
+  - 2D corner error (best-automorphism, PnP 무관 순수 keypoint 품질 지표)
   - 3D Volume Ratio (predicted cuboid volume / GT volume)
+  - same-index reproj/PCK 도 reference 로 함께 출력 (convention 진단용)
 
 사용법:
     python scripts/data_prep/eval/evaluate_on_val.py \
@@ -26,6 +40,7 @@ from scipy.ndimage import gaussian_filter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "Deep_Object_Pose", "common"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "Deep_Object_Pose", "train"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "self_training"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "challenge", "scripts"))
 
 try:
     from models import DopeNetwork
@@ -33,8 +48,135 @@ except ImportError:
     print("[ERROR] Cannot import DopeNetwork. Check Deep_Object_Pose path.")
     sys.exit(1)
 
-from pnp_solver import PalletPnPSolver, make_camera_matrix, make_pallet_keypoints_3d
+from pnp_solver import (
+    PalletPnPSolver, make_camera_matrix, make_pallet_keypoints_3d,
+    make_pallet_keypoints_3d_isaac,
+)
 from metrics import compute_reproj_error
+import annotate_pnp as _apnp  # order-free PnP (auto-dim 110/130 + 24-sym + strict invariants)
+
+
+# ── Order-free corner matching (2026-06-03) ──────────────────────────────────
+# Cuboid 의 48 corner automorphism (graph automorphism of the cube = topology
+# 보존 relabeling). 모델 출력 keypoint 순서가 GT projected_cuboid (Isaac) 순서와
+# 다른 convention mismatch 를 흡수한다. 자유 point assignment (Hungarian) 이
+# 아니라 cube 위상을 보존하는 48 permutation 만 허용 → 메트릭 의미 보존.
+# (생성 근거: pnp_solver Isaac edge topology 의 graph automorphism, 별도 검증.)
+CUBE_AUTOMORPHISMS = np.array([
+    [0, 1, 2, 3, 4, 5, 6, 7], [0, 1, 5, 4, 3, 2, 6, 7], [0, 3, 2, 1, 4, 7, 6, 5],
+    [0, 3, 7, 4, 1, 2, 6, 5], [0, 4, 5, 1, 3, 7, 6, 2], [0, 4, 7, 3, 1, 5, 6, 2],
+    [1, 0, 3, 2, 5, 4, 7, 6], [1, 0, 4, 5, 2, 3, 7, 6], [1, 2, 3, 0, 5, 6, 7, 4],
+    [1, 2, 6, 5, 0, 3, 7, 4], [1, 5, 4, 0, 2, 6, 7, 3], [1, 5, 6, 2, 0, 4, 7, 3],
+    [2, 1, 0, 3, 6, 5, 4, 7], [2, 1, 5, 6, 3, 0, 4, 7], [2, 3, 0, 1, 6, 7, 4, 5],
+    [2, 3, 7, 6, 1, 0, 4, 5], [2, 6, 5, 1, 3, 7, 4, 0], [2, 6, 7, 3, 1, 5, 4, 0],
+    [3, 0, 1, 2, 7, 4, 5, 6], [3, 0, 4, 7, 2, 1, 5, 6], [3, 2, 1, 0, 7, 6, 5, 4],
+    [3, 2, 6, 7, 0, 1, 5, 4], [3, 7, 4, 0, 2, 6, 5, 1], [3, 7, 6, 2, 0, 4, 5, 1],
+    [4, 0, 1, 5, 7, 3, 2, 6], [4, 0, 3, 7, 5, 1, 2, 6], [4, 5, 1, 0, 7, 6, 2, 3],
+    [4, 5, 6, 7, 0, 1, 2, 3], [4, 7, 3, 0, 5, 6, 2, 1], [4, 7, 6, 5, 0, 3, 2, 1],
+    [5, 1, 0, 4, 6, 2, 3, 7], [5, 1, 2, 6, 4, 0, 3, 7], [5, 4, 0, 1, 6, 7, 3, 2],
+    [5, 4, 7, 6, 1, 0, 3, 2], [5, 6, 2, 1, 4, 7, 3, 0], [5, 6, 7, 4, 1, 2, 3, 0],
+    [6, 2, 1, 5, 7, 3, 0, 4], [6, 2, 3, 7, 5, 1, 0, 4], [6, 5, 1, 2, 7, 4, 0, 3],
+    [6, 5, 4, 7, 2, 1, 0, 3], [6, 7, 3, 2, 5, 4, 0, 1], [6, 7, 4, 5, 2, 3, 0, 1],
+    [7, 3, 0, 4, 6, 2, 1, 5], [7, 3, 2, 6, 4, 0, 1, 5], [7, 4, 0, 3, 6, 5, 1, 2],
+    [7, 4, 5, 6, 3, 0, 1, 2], [7, 6, 2, 3, 4, 5, 1, 0], [7, 6, 5, 4, 3, 2, 1, 0],
+], dtype=np.int64)
+
+CUBOID_DIMS = (1.1, 1.3, 0.11)  # (width, depth, height) — self-consistency 최선값
+
+
+def best_corner_permutation(pred8, gt8, valid8):
+    """48 cube automorphism 중 GT corner 와 가장 잘 맞는 permutation 선택.
+
+    Args:
+        pred8:  (8, 2) 예측 corner 픽셀좌표 (모델 출력 순서).
+        gt8:    (8, 2) GT corner 픽셀좌표 (Isaac 순서).
+        valid8: (8,) bool, 예측 corner 검출 여부.
+
+    Returns:
+        perm (8,) int — perm[k] 가 GT index k 에 대응하는 *예측* index, 또는 None.
+        valid 가 4 개 미만이면 None.
+    """
+    if valid8.sum() < 4:
+        return None
+    best_perm = None
+    best_err = np.inf
+    for am in CUBE_AUTOMORPHISMS:
+        vm = valid8[am]
+        if vm.sum() < 4:
+            continue
+        err = np.linalg.norm(pred8[am][vm] - gt8[vm], axis=1).mean()
+        if err < best_err:
+            best_err = err
+            best_perm = am
+    return best_perm
+
+
+# Isaac corner ordering (perm-aligned pred 와 일관) 의 cuboid edge groups.
+# 0=(-w,-h,+d) 1=(+w,..) 3=(..,+h,..) 4=(..,-d): 0->1=W, 0->3=H, 0->4=D.
+_ISAAC_W_EDGES = [(0, 1), (3, 2), (4, 5), (7, 6)]
+_ISAAC_H_EDGES = [(0, 3), (1, 2), (4, 7), (5, 6)]
+_ISAAC_D_EDGES = [(0, 4), (1, 5), (2, 6), (3, 7)]
+
+
+def solve_pnp_iterative(pred_re, valid_re, kp3d, K):
+    """ITERATIVE PnP (flat-pallet 안전). pred_re 는 이미 Isaac 순서로 정합됨.
+
+    EPnP/RANSAC 는 pallet 처럼 거의 평면(height 0.11m << 1.1/1.3) 인 물체에서
+    심하게 발산한다 (GT self-consistency 43px). SOLVEPNP_ITERATIVE + IPPE seed 는
+    동일 GT 에서 4.9px. 따라서 eval reproj 는 ITERATIVE 를 사용.
+
+    Returns (R, t) or None.
+    """
+    idx = [i for i in range(9) if valid_re[i]]
+    if len(idx) < 4:
+        return None
+    obj = kp3d[idx].astype(np.float64)
+    img = np.array([pred_re[i] for i in idx], dtype=np.float64)
+    # IPPE planar seed (top face 4점) → ITERATIVE refine. 실패 시 EPNP seed.
+    R0 = t0 = None
+    for seed_flag in (cv2.SOLVEPNP_EPNP, cv2.SOLVEPNP_SQPNP):
+        try:
+            ok, rvec, tvec = cv2.solvePnP(obj, img, K, None, flags=seed_flag)
+            if ok and tvec[2, 0] > 0:
+                R0, t0 = rvec, tvec
+                break
+        except cv2.error:
+            continue
+    try:
+        if R0 is not None:
+            ok, rvec, tvec = cv2.solvePnP(
+                obj, img, K, None, rvec=R0.copy(), tvec=t0.copy(),
+                useExtrinsicGuess=True, flags=cv2.SOLVEPNP_ITERATIVE)
+        else:
+            ok, rvec, tvec = cv2.solvePnP(
+                obj, img, K, None, flags=cv2.SOLVEPNP_ITERATIVE)
+    except cv2.error:
+        return None
+    if not ok:
+        return None
+    R, _ = cv2.Rodrigues(rvec)
+    t = tvec.flatten()
+    if t[2] <= 0:
+        return None
+    return R, t
+
+
+def reproject_all(kp3d, R, t, K):
+    """9 keypoint 전체 재투영 (9, 2)."""
+    rvec, _ = cv2.Rodrigues(R)
+    proj, _ = cv2.projectPoints(kp3d, rvec, t.reshape(3, 1), K, None)
+    return proj.reshape(-1, 2)
+
+
+def best_match_corner_error(proj8, gt8, valid8):
+    """proj8 (8,2) reprojection 을 GT corner 와 best-48-automorphism 으로 정합한
+    뒤 평균 corner 거리. valid8 (8,) bool 은 GT corner 유효성."""
+    best = np.inf
+    for am in CUBE_AUTOMORPHISMS:
+        d = np.linalg.norm(proj8[am][valid8] - gt8[valid8], axis=1).mean()
+        if d < best:
+            best = d
+    return best
 
 
 def load_model(weights_path, device):
@@ -135,7 +277,8 @@ def compute_volume_from_keypoints(pred_kps_orig, R, t, camera_matrix):
     cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
 
     # 고정 3D 모델 keypoints의 PnP 복원 depth (per-corner)
-    kp3d = make_pallet_keypoints_3d()
+    # Isaac corner ordering (perm-aligned pred 와 일관) + self-consistency dims.
+    kp3d = make_pallet_keypoints_3d_isaac(*CUBOID_DIMS)
     corners_3d_cam = (R @ kp3d[:8].T).T + t  # (8, 3)
 
     # 예측 2D keypoint를 각 corner의 depth로 back-project
@@ -162,7 +305,7 @@ def compute_volume_from_keypoints(pred_kps_orig, R, t, camera_matrix):
     return edge_w * edge_h * edge_d
 
 
-GT_VOLUME = 1.1 * 1.1 * 0.15  # 0.1815 m³
+GT_VOLUME = CUBOID_DIMS[0] * CUBOID_DIMS[1] * CUBOID_DIMS[2]  # 1.1*1.3*0.11
 
 
 def main():
@@ -185,18 +328,25 @@ def main():
     print(f"Loading model: {args.weights}")
     model = load_model(args.weights, device)
 
-    # PnP solver setup
+    # PnP setup — Isaac corner ordering + self-consistency dims.
+    # order-free 정합 후 pred 는 Isaac 순서로 재배열되므로 isaac kp3d 사용.
+    # EPnP/RANSAC 는 flat pallet 에서 발산 → solve_pnp_iterative (ITERATIVE) 사용.
     cam_matrix = make_camera_matrix(args.fx, args.fy, args.cx, args.cy)
-    pnp_solver = PalletPnPSolver(cam_matrix)
+    kp3d_isaac = make_pallet_keypoints_3d_isaac(*CUBOID_DIMS)
 
     png_files = sorted(glob.glob(os.path.join(args.val_dir, "*.png")))[:args.max_frames]
     print(f"Evaluating {len(png_files)} frames...")
 
+    # order-free (primary) counters
     pck_counters = {3: [0, 0], 5: [0, 0], 10: [0, 0]}
     pnp_success_count = 0
     pnp_total = 0
-    reproj_errors = []
+    reproj_errors = []        # PnP reproj (order-free)
+    corner2d_errors = []      # best-automorphism 2D corner error (PnP 무관)
     volume_ratios = []
+    # same-index reference counters (convention 진단용)
+    pck_same = {3: [0, 0], 5: [0, 0], 10: [0, 0]}
+    reproj_same = []
 
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
@@ -227,60 +377,112 @@ def main():
         gt_cuboid = obj["projected_cuboid"]
         gt_centroid = obj["projected_cuboid_centroid"]
 
-        # GT를 belief map 해상도로 스케일링
+        # 해상도 스케일 (orig <-> belief)
         h_orig, w_orig = img.shape[:2]
         bh, bw = belief.shape[1], belief.shape[2]
-        sx, sy = bw / w_orig, bh / h_orig
-        gt_kps_scaled = [(gx * sx, gy * sy) for gx, gy in gt_cuboid]
-        gt_kps_scaled.append((gt_centroid[0] * sx, gt_centroid[1] * sy))
+        sx, sy = bw / w_orig, bh / h_orig  # orig px → belief px
 
-        # PCK@3, @5, @10
-        for thr in pck_counters:
-            c, t = compute_pck(pred_kps, gt_kps_scaled, threshold_px=thr)
-            pck_counters[thr][0] += c
-            pck_counters[thr][1] += t
-
-        # --- 6D Pose 메트릭: PnP reproj vs GT 2D ---
-        # (GT pose_transform은 Isaac Sim world 좌표계라 PnP camera 좌표계와 직접 비교 불가)
-        # 대신 PnP로 복원한 포즈를 다시 2D로 재투영해서 GT 2D keypoint와 비교
-        pred_kps_orig = []
-        for kp in pred_kps:
-            if kp[0] < 0:
-                pred_kps_orig.append(None)
-            else:
-                pred_kps_orig.append((float(kp[0]) / sx, float(kp[1]) / sy))
+        # 예측 keypoint (orig 해상도) + validity (9점)
+        pred9 = np.full((9, 2), -1.0, dtype=np.float64)
+        valid9 = np.zeros(9, dtype=bool)
+        for k in range(9):
+            if pred_kps[k][0] >= 0:
+                pred9[k] = [pred_kps[k][0] / sx, pred_kps[k][1] / sy]
+                valid9[k] = True
+        gt9 = np.array(gt_cuboid + [gt_centroid], dtype=np.float64)  # orig 해상도
 
         pnp_total += 1
-        success, R_pred, t_pred, _ = pnp_solver.solve(pred_kps_orig)
 
-        if success:
+        # === same-index reference (convention 진단용) ===
+        gt_scaled_same = [(gx * sx, gy * sy) for gx, gy in gt_cuboid]
+        gt_scaled_same.append((gt_centroid[0] * sx, gt_centroid[1] * sy))
+        for thr in pck_same:
+            c, t = compute_pck(pred_kps, gt_scaled_same, threshold_px=thr)
+            pck_same[thr][0] += c
+            pck_same[thr][1] += t
+
+        # === ORDER-FREE 정합 (48 cube automorphism, centroid 고정) ===
+        perm = best_corner_permutation(pred9[:8], gt9[:8], valid9[:8])
+        if perm is None:
+            continue  # corner 4개 미만 — PnP/PCK 불가
+        pred_re = pred9.copy()
+        pred_re[:8] = pred9[:8][perm]
+        valid_re = valid9.copy()
+        valid_re[:8] = valid9[:8][perm]
+
+        # PCK (order-free) — belief 해상도 거리. centroid(8) 포함.
+        for k in range(9):
+            if not valid_re[k]:
+                continue
+            dist_belief = np.hypot(
+                (pred_re[k, 0] - gt9[k, 0]) * sx,
+                (pred_re[k, 1] - gt9[k, 1]) * sy,
+            )
+            for thr in pck_counters:
+                pck_counters[thr][1] += 1
+                if dist_belief <= thr:
+                    pck_counters[thr][0] += 1
+
+        # 2D corner error (best-automorphism, orig 해상도) — PnP 무관 keypoint 품질
+        c2d = np.linalg.norm(pred_re[valid_re] - gt9[valid_re], axis=1).mean()
+        corner2d_errors.append(c2d)
+
+        # === PnP (order-free) → reproj vs GT 2D ===
+        # annotate_pnp.solve_pose 는 raw 예측 순서를 입력으로 받아 auto-dim
+        # (110/130 정면) + 24 cube symmetry + strict invariant 로 *기하학적으로*
+        # 올바른 pose 를 찾는다 (입력 label 순서 무관). 이후 reprojection 을
+        # GT 2D 와 best-48-automorphism 으로 정합해 reproj error 측정.
+        pred_raw = [tuple(pred9[k]) if valid9[k] else None for k in range(9)]
+        pose = _apnp.solve_pose(pred_raw, cam_matrix)
+        if pose is not None:
             pnp_success_count += 1
-            # PnP pose → 2D reproj → GT 2D와 비교
-            reproj_pred = pnp_solver.reproject(R_pred, t_pred)
-            gt_kps_orig = np.array(gt_cuboid + [gt_centroid], dtype=np.float64)
-            reproj_err, per_point = compute_reproj_error(gt_kps_orig, reproj_pred)
+            proj_all = np.array(pose["projected_all"], dtype=np.float64)  # (9,2)
+            reproj_err = best_match_corner_error(
+                proj_all[:8], gt9[:8], np.ones(8, dtype=bool))
             reproj_errors.append(reproj_err)
 
-            # 3D 부피 비교
+            # 부피: 예측 2D keypoint(perm-aligned, Isaac 순서)를 solve_pose 의
+            # per-corner depth 로 back-project 하여 복원된 cuboid 부피 추정.
+            R_pred = pose["R"]
+            t_pred = pose["t"]
+            pred_re_list = [tuple(pred_re[k]) if valid_re[k] else None
+                            for k in range(9)]
             pred_vol = compute_volume_from_keypoints(
-                pred_kps_orig, R_pred, t_pred, cam_matrix)
+                pred_re_list, R_pred, t_pred, cam_matrix)
             if pred_vol is not None and pred_vol > 0:
                 volume_ratios.append(pred_vol / GT_VOLUME)
 
         if (i + 1) % 50 == 0:
             pck3 = pck_counters[3][0] / max(pck_counters[3][1], 1)
-            print(f"  [{i+1}/{len(png_files)}] PCK@3px: {pck3:.3f}, PnP success: {pnp_success_count}/{pnp_total}")
+            print(f"  [{i+1}/{len(png_files)}] PCK@3px(of): {pck3:.3f}, "
+                  f"PnP: {pnp_success_count}/{pnp_total}")
 
     # ========== 최종 결과 ==========
     print(f"\n{'='*60}")
     print(f" DOPE Evaluation Results ({len(png_files)} frames)")
     print(f"{'='*60}")
 
-    # PCK
+    # PCK (order-free)
+    print("  [PCK — order-free (48 cube automorphism 정합)]")
     for thr in sorted(pck_counters):
         c, t = pck_counters[thr]
         pck = c / max(t, 1)
         print(f"  PCK@{thr}px:   {pck:.4f}  ({c}/{t})")
+
+    # PCK same-index reference
+    print("  [PCK — same-index reference (convention 진단용)]")
+    for thr in sorted(pck_same):
+        c, t = pck_same[thr]
+        print(f"  PCK@{thr}px(si): {c / max(t, 1):.4f}  ({c}/{t})")
+
+    # 2D corner error (PnP 무관)
+    if corner2d_errors:
+        c2d = np.array(corner2d_errors)
+        print(f"\n  --- 2D Corner Error (order-free, {len(c2d)} frames) ---")
+        print(f"  Corner err mean:    {c2d.mean():.2f} px")
+        print(f"  Corner err med:     {np.median(c2d):.2f} px")
+        print(f"  Corner <5px:        {np.mean(c2d < 5.0) * 100:.1f}%")
+        print(f"  Corner <10px:       {np.mean(c2d < 10.0) * 100:.1f}%")
 
     # PnP + Reproj 메트릭
     print(f"\n  PnP success:  {pnp_success_count}/{pnp_total} ({pnp_success_count/max(pnp_total,1)*100:.1f}%)")
@@ -289,7 +491,7 @@ def main():
         reproj_arr = np.array(reproj_errors)
         reproj_5px = np.mean(reproj_arr < 5.0) * 100
         reproj_10px = np.mean(reproj_arr < 10.0) * 100
-        print(f"\n  --- PnP Reproj Metrics ({len(reproj_errors)} frames) ---")
+        print(f"\n  --- PnP Reproj Metrics (order-free, {len(reproj_errors)} frames) ---")
         print(f"  Reproj error mean:  {reproj_arr.mean():.2f} px")
         print(f"  Reproj error med:   {np.median(reproj_arr):.2f} px")
         print(f"  Reproj <5px:        {reproj_5px:.1f}%")
@@ -315,7 +517,12 @@ def main():
 
     # 결과 저장
     summary = {
+        "matching": "order-free (48 cube automorphism, centroid fixed)",
+        "cuboid_dims": list(CUBOID_DIMS),
         "pck": {f"@{thr}px": pck_counters[thr][0] / max(pck_counters[thr][1], 1) for thr in pck_counters},
+        "pck_same_index": {f"@{thr}px": pck_same[thr][0] / max(pck_same[thr][1], 1) for thr in pck_same},
+        "corner2d_mean_px": float(np.mean(corner2d_errors)) if corner2d_errors else None,
+        "corner2d_median_px": float(np.median(corner2d_errors)) if corner2d_errors else None,
         "pnp_success_rate": pnp_success_count / max(pnp_total, 1),
         "reproj_mean_px": float(np.mean(reproj_errors)) if reproj_errors else None,
         "reproj_median_px": float(np.median(reproj_errors)) if reproj_errors else None,

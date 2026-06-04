@@ -3,6 +3,18 @@
 팔레트 6D 포즈 추정을 위한 기하학적 제약 기반 준지도 DA 프레임워크.
 Python + PyTorch + Isaac Sim + DOPE.
 
+## ⚠️ 핵심 방향 (새 세션 필독 — v8 회귀 금지)
+
+> 새 세션에서 옛 문서(`_docs/filter/2026-04-11_selection.md`, "RANSAC c≥6", "Y=UP object-frame")를 보고 **v8 로 돌아가지 말 것.** 자세한 내용은 memory 의 [v8 폐기], [camera-facing convention], [두 트랙] 3개 메모리.
+
+1. **v8 = 완전 폐기 실패작.** `v8_ablation_A_coord`, object-frame `mixed_v8`, `pl_*_r0_*`(소문자) 절대 사용 금지. object-frame 점을 0123 으로 잘못 구성한 데이터로 학습한 모델.
+2. **convention = camera-facing 0123** (v4, 2026-05-22 결정). 0~3=앞면, **{0,1,4,5}=위 / {2,3,6,7}=아래**, 8=centroid. (아래 Architecture 의 "Y=UP" 표기는 폐기됨.)
+3. **두 트랙 병행**:
+   - **논문용**: v1/v2(내 파렛트) 제외, 인터넷 무료 모델로 학습 → 처음 본 파렛트 일반화. 비율 강건성(squash + JSON 꼭짓점 동기화) + truncation padding + 기하 필터 self-training.
+   - **과제용 (challenge)**: v1/v2 과적합, forklift 실배포.
+4. **PnP 용도 분리**: self-training PL 필터 = 2D 기하로 PnP 불필요(처음 본 파렛트 가능) / 평가·거리추정 = 치수 known 데이터에서만.
+5. **필터 동기**: PL 수보다 **품질(신뢰도)** 이 핵심 (발표 교훈 — indoor 소량 PL 로 R1 ↑, outdoor/night 다량 PL 인데 R2 ↓).
+
 ## 연구 가이드
 
 최신 연구 설계: `_docs/` (README.md에서 목차 확인)
@@ -41,13 +53,13 @@ Python + PyTorch + Isaac Sim + DOPE.
 - **PnP**: EPnP + RANSAC (`scripts/self_training/pnp_solver.py`) — keypoint → 6D 포즈 복원
 - 합성 데이터: Isaac Sim 4.5.0 + Omniverse Replicator, NDDS 포맷 JSON annotation
 - USD 모델: `data/pallet/models_usd/scene*.usd` (4종 팔레트)
-- Geometric Filter: **RANSAC subset consensus** (n_iter=50, k=5, τ=5px, c≥6) + size sanity. 2026-04-11 GT 기반 P/R 분석으로 canonical A/B/C/D 중 1등 선정. 필터 전용 문서: `_docs/filter/` (selection, ablation, sweep 등 누적). canonical 필터는 `scripts/data_prep/canonical_filters.py`에 ablation 용으로 보존.
-- Keypoint convention: Y=UP, 8 cuboid corners + centroid (memory 참조)
+- Geometric Filter: **재설계 중 (camera-facing 0123 기반 2D 기하 필터).** 옛 "RANSAC c≥6" 선정(`_docs/filter/2026-04-11_selection.md`)은 v8/object-frame 기준이라 폐기. 새 방향: 공간 대각선 교점≈centroid, {0,1,4,5}위/{2,3,6,7}아래, 변 비율 등 2D projective 기하 (PnP 불필요). 정확한 설계는 `3d-expert` 위임. 필터 전용 문서: `_docs/filter/`.
+- Keypoint convention: **camera-facing 0123** (0~3 앞면, {0,1,4,5}=위/{2,3,6,7}=아래, 8=centroid). memory `camera-facing-0123-convention` 참조. (위 "핵심 방향" 참고 — 옛 Y=UP object-frame 은 폐기)
 - **평가 (Synthetic val)**: PCK@3/5/10px + PnP Reproj + Volume Ratio — `scripts/data_prep/eval/evaluate_on_val.py`
 - **평가 (Real test)**: ADD + 5cm5° + Reproj — `scripts/data_prep/eval/evaluate_real.py` (AprilTag GT 기반)
 - **Real data**: seen/unseen/unlabeled/dev split — `data/pallet/real_data/`
 - 실시간 추론: `scripts/dope/run_dope_live.py` + RealSense D435i (native, pyrealsense2)
-- 팔레트 규격: KS T-11형 1100×1100×150mm (config에서 관리)
+- 팔레트 규격: **논문용은 고정 비율 없음** (처음 본 파렛트 일반화 목표 → squash 로 여러 비율 학습). PnP 가 필요한 평가/거리추정은 치수 known 데이터(내 파렛트 GT, 과제용)에서만. config 의 KS T-11형 1100×1100×150mm 은 v8 잔재 — 실측 치수 별도 확인 필요.
 
 ## Code Style
 

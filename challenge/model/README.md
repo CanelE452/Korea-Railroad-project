@@ -5,13 +5,22 @@ git pull 받은 후 아래 가중치를 직접 복사/다운로드해 두세요.
 
 ## 필요 파일
 
-### `challengenight.pth` (필수)
+### `*.pth` (DOPE 가중치 — 파일명 자유)
+
+이 폴더에 DOPE 가중치 `.pth` 를 하나 넣으면 **파일명과 무관하게 자동 인식**됩니다.
+(`calib/config.py` 의 `_resolve_model_path_6d()` 가 폴더를 glob 으로 탐색)
+
+선택 우선순위:
+1. 환경변수 `MODEL_PATH_6D` 가 있으면 그 경로
+2. 폴더에 `.pth` 가 1개면 그것
+3. 여러 개면 `challengenight.pth` 우선(기존 호환), 없으면 이름순 첫 번째
 
 - **용도**: `25y_automatic_lifter-master/.../depth_cam/main_rec.py` 의 DOPE 6D pose 추론
 - **크기**: ~192 MB
 - **참조 코드**: `calib/config.py` 의 `MODEL_PATH_6D`
-- **학습 데이터**: synthetic (Blender + Isaac Sim) + capture night 데이터로 fine-tune
-- **모델 구조**: DopeNetwork (VGG-19 backbone, 9 belief + 16 affinity)
+- **모델 구조**: DopeNetwork (VGG-19 backbone, 9 belief + 16 affinity), camera-facing 0123
+- **예시 가중치**: `challengenight.pth`(challenge 실배포) /
+  `pallet-dope-cropaug-truncation`(논문용 truncation best, HF `CanelE452/pallet-dope-cropaug-truncation`)
 
 ## 다운로드 방법
 

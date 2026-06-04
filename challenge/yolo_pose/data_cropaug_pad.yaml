@@ -1,0 +1,13 @@
+# crop-aug truncation finetune (padding 100px)
+# train 1007 = 원본 manual 177 + forklift 32 + real crop 404 + synth(mixed_v8) crop 394
+#   - crop: 좌/우 측면 잘림 위주(L/R ~75%), degenerate 필터(면적≥10%, min변≥50px, in-kp≥5)
+#   - holdout 42 frame 파생 real crop 81개 제외 (leakage 방지)
+# val 42 = A(yolo_pose_manual_padded)와 동일 holdout (비교 일관성, crop 미포함)
+train: /home/minjae/Documents/github/pallet-pose/challenge/data/yolo_pose_cropaug_padded/images/train
+val: /home/minjae/Documents/github/pallet-pose/challenge/data/yolo_pose_cropaug_padded/images/val
+
+nc: 1
+names:
+  0: pallet
+kpt_shape: [9, 3]
+flip_idx: [1, 0, 3, 2, 5, 4, 7, 6, 8]

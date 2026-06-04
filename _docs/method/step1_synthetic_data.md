@@ -1,90 +1,49 @@
-# Step 1: Isaac Sim 합성 데이터로 DOPE 학습
+# Step 1 — 합성 데이터 + DOPE 학습 (paper_base)
 
-## 3.1 워크플로우 개요
+> camera-facing 0123. 폐기 v8 버전은 `archive/step1_synthetic_data.md`.
 
-NVIDIA Developer 공식 자료에서 제시한 워크플로우를 기반으로 한다:
+## 목표
 
-- **자료 1 (팔레트 감지 모델):** OpenUSD + Omniverse Replicator로 팔레트 합성 데이터를 생성하고 반복적으로 다양성을 늘려 감지 모델을 개선하는 워크플로우
-  - URL: https://developer.nvidia.com/ko-kr/blog/developing-a-pallet-detection-model-using-openusd-and-synthetic-data/
-  - GitHub: https://github.com/NVIDIA-AI-IOT/sdg_pallet_model
+인터넷 무료 3D 팔레트 모델 기반 합성 데이터로 DOPE 를 학습하되,
+**비율 강건성**(처음 본 파렛트 대응)과 **truncation 강건성**(잘린 이미지)을
+확보한 논문용 base 모델 `paper_base` 를 만든다.
 
-- **자료 2 (팔레트 잭 감지):** Isaac Sim + Replicator로 domain randomization을 단계적으로 적용하는 구체적 코드 예시
-  - URL: https://developer.nvidia.com/ko-kr/blog/how-to-train-autonomous-mobile-robots-to-detect-warehouse-pallet-jacks-using-synthetic-data/
-  - GitHub: https://github.com/NVIDIA-AI-IOT/synthetic_data_generation_training_workflow
-
-## 3.2 시뮬레이터 환경
-
-- **시뮬레이터:** NVIDIA Isaac Sim 4.5.0 (Omniverse 기반)
-- **데이터 생성 API:** Omniverse Replicator
-- **스크립트:** `scripts/data_prep/gen_replicator_data.py`
-
-## 3.3 3D 모델
-
-4종 USD 팔레트 모델 사용 (`data/pallet/models_usd/scene*.usd`).
-각 모델의 ORIENTATION_OVERRIDES와 좌표계 정규화 → [keypoint_definition.md](../preprocessing/keypoint_definition.md) 참조.
-
-## 3.4 Domain Randomization 요약
-
-상세 구현 및 파라미터 → [data_pipeline.md](../preprocessing/data_pipeline.md) Section 3 참조.
-
-주요 항목: 배경(창고/실내/야외), 팔레트 색상(프리셋+HSV), 조명(DomeLight+RectLight×3), Distractors(54종), 가림(80% 적재물), 카메라(3 Mode), 팔레트 배치(tilt=0°, yaw 자유).
-
-## 3.5 DOPE 모델 구조
+## 학습 데이터 (경로 확정)
 
 ```
-입력: RGB 이미지 (448 × 448)
-      ↓
-VGG-19 Backbone (ImageNet pre-trained)
-→ feature map (50 × 50 × 512)
-      ↓
-Multi-Stage CNN Heads (Stage 1~6)
-→ Belief maps: 9채널 (8 꼭짓점 + 1 centroid)
-→ Affinity fields: 16채널
+합성 base    data/pallet/training_data/mixed_v8_train      9,000장  camera-facing v4
+truncation   challenge/data/truncation_crops_dope/pretrain 8,831장  crop+padding
+squash       [미생성] 비율 강건 증강
+제외         challenge/data/training/v1·v2 (내 파렛트)
 ```
 
-## 3.6 학습 설정
+## 1) 비율 강건성 — squash 증강 [TODO]
 
-```yaml
-Step1_Training:
-  optimizer: Adam
-  learning_rate: 1e-4
-  weight_decay: 1e-4
-  batch_size: 4
-  epochs: 60
-  lr_scheduler: StepLR (step=20, gamma=0.1)
-  input_size: 448 × 448
-  output_size: 50 × 50
-  sigma: 4.0  # belief map Gaussian std (DOPE 공식 기본값)
-  loss: MSE(predicted_belief, GT_belief) + MSE(predicted_affinity, GT_affinity)
-  data: 5,000~15,000장 합성 이미지
-```
+처음 본 파렛트는 aspect ratio 가 제각각인데 우리는 특정 비율 합성만 학습 →
+일반화 약함. 해결: 학습 이미지를 여러 비율로 **squash(찌부)/stretch** 증강.
 
-> **sigma 설정**: belief map GT 생성 시 각 keypoint에 sigma=4.0인 Gaussian을 찍는다.
-> 50×50 output에서 ~25×25 픽셀 영역(전체의 25%)을 커버하여 충분한 gradient signal을 제공한다.
-> sigma=0.5는 거의 1픽셀 peak만 생성하여 gradient vanishing 문제를 일으킨다.
+- ⚠️ 이미지 변형 시 **JSON 꼭짓점(projected_cuboid)도 동일 변형 동기** 필수.
+- 좌표 변환이라 `3d-expert` 위임으로 증강 스크립트 작성 + 검증.
+- 변형 범위/분포(어느 비율까지), 원본:증강 비중은 실험으로 결정.
 
-## 3.7 Annotation 형식
+## 2) truncation 강건성 — crop + padding
 
-NDDS 호환 포맷. 각 이미지에 대해 JSON 파일 자동 생성:
-- `projected_cuboid`: 8개 꼭짓점 2D 좌표
-- `projected_cuboid_centroid`: 중심 2D 좌표
-- `cuboid`: 8개 꼭짓점 3D 좌표
-- `pose_transform`: 4×4 포즈 행렬
+9 keypoint 다 보이는 이미지를 crop 해 일부 코너가 화면 밖으로 나간 상황 합성 →
+DOPE 로더가 padding 영역 확보 후 **화면 밖 코너의 belief map 을 padding 영역에
+그려 supervise** (8/8 supervised 검증). 잘려도 9점 회귀 → PnP 6점 안정.
 
-## 3.8 평가 메트릭
+- 기존 자산 `truncation_crops_dope/` 재활용 (dope_cropaug 방식).
+- 효과(과제 트랙 검증): real truncation PnP 23→99%, det 13→94%.
+- 측면(L/R) 잘림 위주 (top 잘림은 비현실적·degenerate) — memory `truncation-side-cut-bias`.
 
-`scripts/data_prep/eval/evaluate_on_val.py`로 종합 평가. 주요 메트릭: PCK@3/5/10px, PnP 성공률, Reproj error, ADD, 5cm-5°.
+## 3) 학습 설정
 
-수학적 정의 → [formulation.md](formulation.md) Section 10 참조.
+- DOPE VGG-19, 9 belief + 16 affinity, sigma=4.0 (sigma<1 gradient vanishing).
+- finetune 은 누적 epoch (memory `dope-finetune-cumulative-epoch`).
+- 중간 산출물 `dope_cropaug_pretrain`(squash 없음) → squash 추가 후 재학습 = paper_base.
 
-> Keypoint 추출: DOPE 공식 sub-pixel 방식 (Gaussian filter + NMS + 11×11 weighted average)
+## 체크리스트
 
-## 3.9 반복적 개선 프로세스
-
-```
-Round 1: 1000장 생성 → 학습 → 실제 이미지 테스트 → 실패 분석
-Round 2: 1000장 추가 (DR 보강) → 재학습 → 재테스트
-Round 3: 1000장 추가 (distractors 강화) → 재학습
-Round 4: 편향 확인 → 보완 데이터 추가
-최종: 총 5,000~15,000장
-```
+- [ ] squash 증강 데이터 생성 (JSON 동기) — 3d-expert
+- [ ] camera-facing v4 변환 정합성 최종 검증 — 3d-expert
+- [ ] paper_base 학습 (합성 + squash + truncation)

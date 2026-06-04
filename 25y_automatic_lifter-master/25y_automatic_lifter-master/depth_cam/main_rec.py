@@ -16,18 +16,21 @@ from calib.config import (
     EMA_ALPHA_OFFSET, EMA_ALPHA_YAW, EMA_ALPHA_WIDTH,
     COLOR_ALERT, COLOR_STATUS_OK, COLOR_META, COLOR_BOX, COLOR_CNT, COLOR_CENTER,
     COLOR_YAW, COLOR_OFFSET, COLOR_WIDTH,
-    USE_6D_MODE, USE_PERCEPTION_YOLO,
+    USE_6D_MODE, USE_PERCEPTION_YOLO, POSE_BACKEND, MODEL_PATH_6D_YOLO,
     MODEL_PATH_6D, DOPE_INPUT_HEIGHT, DOPE_PEAK_THRESHOLD, DOPE_PEAK_SIGMA,
     DOPE_THRESH_MAP, DOPE_THRESH_POINTS, DOPE_THRESH_ANGLE, DOPE_SOFTMAX,
     DOPE_GATE_MIN_KP, DOPE_GATE_MAX_REPROJ_PX, DOPE_GATE_Z_MIN_M, DOPE_GATE_Z_MAX_M,
     DOPE_GATE_DEPTH_REL, DOPE_GATE_EDGE_RATIO_TOL, DOPE_CONFIRM_FRAMES,
     PALLET_WIDTH_M, PALLET_HEIGHT_M, PALLET_DEPTH_M,
+    CAM_TO_FORK_T, CAM_TO_FORK_RPY_DEG,
+    DEPTH_CORRECT_Z_MIN_M, DEPTH_CORRECT_Z_MAX_M,
 )
 from calib.hud import draw_panel
 from calib.fsm import CalibrationFSM
 from calib.control import can_init, can_close, is_mock as can_is_mock
 from calib.utils import fmt_deg, fmt_m
-from calib.pose6d_adapter import pose6d_to_align_vars
+from calib.pose6d_adapter import pose6d_to_align_vars, depth_scale_correct, apply_cam_to_fork
+from calib.dope_inference import _sample_depth
 from ui.diagram import draw_fsm_diagram_panel
 
 # YOLO segmentation + RGB-D RANSAC 은 USE_PERCEPTION_YOLO=True 일 때만 import 시도.
@@ -181,9 +184,35 @@ def main():
         perception = None
     fsm = CalibrationFSM()
 
-    # === 6D pose (DOPE) 추론기 ===
+    # === 6D pose 추론기 (backend = dope | yolo) ===
+    # 두 backend 모두 동일한 infer_pose(bgr, K, depth_frame) → dict 계약을 따르므로
+    # 아래 추론/FSM 루프는 backend 와 무관하게 동일하게 동작한다. (dope_pose 변수 재사용)
     dope_pose = None
-    if USE_6D_MODE:
+    _gates = {
+        "min_kp": DOPE_GATE_MIN_KP,
+        "max_reproj_px": DOPE_GATE_MAX_REPROJ_PX,
+        "z_min_m": DOPE_GATE_Z_MIN_M,
+        "z_max_m": DOPE_GATE_Z_MAX_M,
+        "depth_rel": DOPE_GATE_DEPTH_REL,
+        "edge_ratio_tol": DOPE_GATE_EDGE_RATIO_TOL,
+    }
+    if USE_6D_MODE and POSE_BACKEND == "yolo":
+        try:
+            from calib.yolo_inference import YoloPoseEstimator
+            dope_pose = YoloPoseEstimator(
+                weights_path=MODEL_PATH_6D_YOLO,
+                pallet_width_m=PALLET_WIDTH_M,
+                pallet_height_m=PALLET_HEIGHT_M,
+                pallet_depth_m=PALLET_DEPTH_M,
+                gates=_gates,
+                confirm_frames=DOPE_CONFIRM_FRAMES,
+            )
+            print(f"✅ YOLO 6D pose estimator 초기화 완료 ({MODEL_PATH_6D_YOLO})")
+        except Exception as e:
+            print(f"❌ YOLO 6D pose estimator 초기화 실패: {e}")
+            print("   기존 RGB-D RANSAC perception 모드로 fallback")
+            dope_pose = None
+    elif USE_6D_MODE:
         try:
             from calib.dope_inference import DopePoseEstimator
             dope_pose = DopePoseEstimator(
@@ -198,14 +227,7 @@ def main():
                 thresh_points=DOPE_THRESH_POINTS,
                 thresh_angle=DOPE_THRESH_ANGLE,
                 softmax=DOPE_SOFTMAX,
-                gates={
-                    "min_kp": DOPE_GATE_MIN_KP,
-                    "max_reproj_px": DOPE_GATE_MAX_REPROJ_PX,
-                    "z_min_m": DOPE_GATE_Z_MIN_M,
-                    "z_max_m": DOPE_GATE_Z_MAX_M,
-                    "depth_rel": DOPE_GATE_DEPTH_REL,
-                    "edge_ratio_tol": DOPE_GATE_EDGE_RATIO_TOL,
-                },
+                gates=_gates,
                 confirm_frames=DOPE_CONFIRM_FRAMES,
             )
             print("✅ DOPE 6D pose estimator 초기화 완료")
@@ -409,8 +431,31 @@ def main():
                         and dope_result.get("gate_passed")
                         and dope_result.get("R") is not None):
                     try:
+                        # --- 단일 주입점: depth scale 보정 + cam→fork extrinsic ---
+                        # DOPE·YOLO 두 backend 공통 (동일 dict 계약). monocular PnP 의
+                        # t scale 모호성을 centroid 픽셀 RealSense depth 로 고정한다.
+                        R6 = dope_result["R"]
+                        t6 = dope_result["t_m"]
+                        raw_o = dope_result.get("raw_points_orig") or []
+                        proj_o = dope_result.get("proj_points_orig") or []
+                        cuv = None
+                        if len(raw_o) > 8 and raw_o[8] is not None:
+                            cuv = raw_o[8]
+                        elif len(proj_o) > 8 and proj_o[8] is not None:
+                            cuv = proj_o[8]
+                        d_cen = None
+                        if cuv is not None:
+                            d_cen = _sample_depth(depth_frame, cuv[0], cuv[1])
+                        t6, _depth_ok = depth_scale_correct(
+                            t6, cuv, d_cen,
+                            z_min_m=DEPTH_CORRECT_Z_MIN_M,
+                            z_max_m=DEPTH_CORRECT_Z_MAX_M,
+                        )
+                        R6, t6 = apply_cam_to_fork(
+                            R6, t6, CAM_TO_FORK_T, CAM_TO_FORK_RPY_DEG,
+                        )
                         psi_pallet_deg, d_lateral_m, d_forward_m = pose6d_to_align_vars(
-                            dope_result["R"], dope_result["t_m"],
+                            R6, t6,
                         )
                     except Exception as e:
                         print(f"[Pose6D] pose6d_to_align_vars error: {e}")

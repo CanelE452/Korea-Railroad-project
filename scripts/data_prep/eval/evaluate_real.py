@@ -140,7 +140,9 @@ def main():
         args.cx, args.cy = K[0, 2], K[1, 2]
         print(f"Loaded intrinsics from {args.cam_k}: fx={args.fx:.2f} fy={args.fy:.2f} cx={args.cx:.2f} cy={args.cy:.2f}")
     cam_matrix = make_camera_matrix(args.fx, args.fy, args.cx, args.cy)
-    kp3d = make_pallet_keypoints_3d_isaac(1.1, 1.3, 0.11)
+    # NOTE: 학습 시 가정한 pallet 크기 (1.1, 1.1, 0.15) 와 일치시킴
+    # (config/default.yaml pallet: width 1.1, depth 1.1, height 0.15)
+    kp3d = make_pallet_keypoints_3d_isaac(1.1, 1.1, 0.15)
     pnp_solver = PalletPnPSolver(cam_matrix, keypoints_3d=kp3d)
     evaluator = PoseEvaluator(kp3d[:8])  # 8 corners for ADD
 

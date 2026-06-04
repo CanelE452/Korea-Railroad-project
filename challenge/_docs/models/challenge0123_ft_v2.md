@@ -1,0 +1,55 @@
+# challenge0123_ft_v2
+
+## 학습 설정
+
+```
+Weight:      weights/challenge0123_ft_v2/net_epoch_0080.pth (확인 시점; 학습 목표 120)
+초기 weight: weights/challenge0123/final_net_epoch_0060.pth
+Epochs:      120 (60 → 120, 60 ep ft)
+Batch size:  8
+LR:          1e-4
+Sigma:       4.0
+Image size:  448
+Workers:     4
+Seed:        8055
+```
+
+## 학습 데이터 (14 manual GT)
+
+낮 8 capture:
+```
+challenge/data/capturepallet02_manual_gt
+challenge/data/capturepallet03_manual_gt
+challenge/data/capturepallet04_manual_gt
+challenge/data/capturepallet05_manual_gt
+challenge/data/capturepallet07_manual_gt
+challenge/data/capturepallet08_manual_gt
+challenge/data/capturepallet09_manual_gt
+challenge/data/capturepalletcad_manual_gt
+```
+
+야간 6 capture:
+```
+challenge/data/capturenight04_manual_gt
+challenge/data/capturenight05_manual_gt
+challenge/data/capturenight06_manual_gt
+challenge/data/capturenight07_manual_gt
+challenge/data/capturenight08_manual_gt
+challenge/data/capturenight09_manual_gt
+```
+
+## Loss 설정
+
+```
+symmetric_loss : False
+struct_loss    : False
+geo_loss       : False
+rel_loss       : False
+```
+
+## 메모
+
+- `_ft_manual` 대비 **야간 capture 6 개 + 낮 capture 추가 (02, 08)** 까지 포함한 더 큰 manual GT pool 로 장기 ft
+- 야간 일반화 목적
+- 학습 진행 중 — 확인 시점 기준 `net_epoch_0080.pth` 까지 저장됨
+- 최종 가중치는 학습 완료 후 `final_net_epoch_0120.pth` 가 저장될 예정

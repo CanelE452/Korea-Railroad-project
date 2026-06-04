@@ -71,7 +71,7 @@ from annotate_pnp import (
     parallelogram_extrapolate,
     PALLET_DIMS,
 )
-from annotate_draw import render
+from annotate_draw import render, MARGIN_L, MARGIN_R, MARGIN_T, MARGIN_B
 from annotate_io import (
     State, make_annotation, save_frame_json, load_existing_annotation,
 )
@@ -83,15 +83,23 @@ def on_mouse(event, x, y, flags, s: State):
     """L click = keypoint set + active advance.  R click = delete.
     TWO-LINE 모드 시 4 클릭으로 교점 계산해서 active kp 위치 결정."""
     s.last_mouse = (x, y)
-    # panel 영역 (image 우측) 클릭은 무시
-    if s.img is not None and x >= s.img.shape[1]:
-        return
+    # panel 영역 (확장 캔버스 우측) 클릭은 무시.
+    # render() 가 [확장캔버스 | panel] 을 hstack — 확장캔버스 폭 = image_w + MARGIN_L + MARGIN_R.
+    # zoom 후에도 확장캔버스는 원래 폭으로 resize 되므로 panel 경계는 항상 canvas_w.
+    if s.img is not None:
+        canvas_w = s.img.shape[1] + MARGIN_L + MARGIN_R
+        if x >= canvas_w:
+            return
     # MANIPULATE 모드에서는 마우스 클릭으로 점 안 찍음
     if s.mode != "click":
         return
 
-    u = (x / s.zoom) + s.pan[0]
-    v = (y / s.zoom) + s.pan[1]
+    # screen → 확장캔버스 좌표 (zoom/pan 역변환) → image 좌표 (margin offset 제거).
+    # image 밖 (u<0, v>480 등) 도 정상 — 여백에서 클릭한 코너의 실제 픽셀 좌표.
+    cu = (x / s.zoom) + s.pan[0]
+    cv = (y / s.zoom) + s.pan[1]
+    u = cu - MARGIN_L
+    v = cv - MARGIN_T
 
     # TWO-LINE sub-mode
     if s.line_mode:
@@ -353,7 +361,9 @@ def _handle_click_key(key, s, out_json, out_png, src_png, K):
         old_z = s.zoom
         s.zoom = min(4.0, s.zoom * 1.5)
         if s.last_mouse and s.img is not None:
-            h, w = s.img.shape[:2]
+            # pan/zoom 은 확장 캔버스 기준 (render 의 crop 도 확장 캔버스 = vis 에 작동).
+            h = s.img.shape[0] + MARGIN_T + MARGIN_B
+            w = s.img.shape[1] + MARGIN_L + MARGIN_R
             cx = s.pan[0] + (s.last_mouse[0] / old_z)
             cy = s.pan[1] + (s.last_mouse[1] / old_z)
             s.pan[0] = int(cx - (w / s.zoom) / 2)

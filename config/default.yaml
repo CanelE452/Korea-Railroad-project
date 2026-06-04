@@ -104,7 +104,7 @@ logging:
 paths:
   python_exe: "python"           # Windows: conda python 전체 경로, Ubuntu: "python"
   dope_train_script: "Deep_Object_Pose/train/train.py"
-  eval_script: "scripts/data_prep/evaluate_on_val.py"
+  eval_script: "scripts/data_prep/eval/evaluate_on_val.py"
   tensorboard_script: "scripts/launch_tensorboard.py"
 
 # --- Notification ---

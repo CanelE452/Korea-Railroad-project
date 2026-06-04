@@ -2,13 +2,19 @@
 
 학습된 DOPE 모델 목록. 각 모델의 학습 설정, 데이터, 평가 결과 기록.
 
+> ⚠️ **트랙/convention 안내 (2026-06-04)**: 프로젝트는 **논문용(`paper_*`)** / **과제용(`challenge*`, `dope_cropaug_ft*`)** 2 트랙. 현행 convention = **camera-facing 0123**.
+> 아래 `mixed_v*` / `v8_ablation` / `selftrain_r1` 및 "Active 모델 요약"·"v8 Ablation"·평가표는 전부 **폐기된 v8(object-frame) 자산** — 새 작업에 사용 금지, history 참고용으로만 보존.
+> 현행 논문용 모델 = **`paper_base`** (아래 `paper_base.md`). 자세히는 CLAUDE.md "핵심 방향" + memory 3종.
+
 ## 문서 구조
 
 ```
 파일                     내용
 ──────────────────────────────────────────────────────────────────────
+paper_base.md            ★ 논문용 base (camera-facing, 합성+squash+truncation, v1/v2 제외) — 명세+로드맵
 dope_architecture.md     DOPE 모델 구조, 학습 설정, annotation 형식, 평가 메트릭
 training_loss.md         Loss 함수 상세 (기본 MSE + Geometric Loss + Symmetric Loss)
+── 이하 폐기 v8(object-frame) 자산 (history 참고용) ──
 mixed_v1.md              baseline (Isaac 4K + Blender 4K)
 mixed_v2.md              mixed_v1 + blender_manydir 2K (개선 없음)
 mixed_v3.md              geo loss 최초 적용 (cuboid 형태 개선, 감지율 하락)

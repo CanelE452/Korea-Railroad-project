@@ -335,6 +335,7 @@ def main(opt):
         use_s3=opt.use_s3,
         buckets=opt.train_buckets,
         endpoint_url=opt.endpoint,
+        truncation_aug_prob=opt.truncation_aug_prob,
     )
     training_data = torch.utils.data.DataLoader(
         training_dataset,
@@ -615,6 +616,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--save", action="store_true", help="save a batch and quit")
+
+    # On-the-fly truncation augmentation
+    parser.add_argument("--truncation_aug_prob", type=float, default=0.0,
+                        help="Probability per sample of applying on-the-fly "
+                             "truncation crop+pad augmentation (0.0=off, "
+                             "challenge pretrain uses 0.6)")
 
     # Symmetric loss (180° front-back swap)
     parser.add_argument("--symmetric_loss", action="store_true",

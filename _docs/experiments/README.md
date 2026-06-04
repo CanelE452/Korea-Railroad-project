@@ -1,131 +1,69 @@
-# Experiments
+# Experiments — camera-facing 논문 실험 인덱스
 
-팔레트 6D 포즈 연구의 모든 실험은 이 폴더에서 독립 파일로 관리한다. 각
-실험 파일은 **하나의 Table 또는 Figure 단위**로 분할되어 있고, 완료되면
-그 파일만 업데이트한다.
+각 실험은 **하나의 Table/Figure 단위** 파일. 양식(빈 틀)을 미리 만들어두고, 실험하면 그 파일을 채운다.
 
-> 2026-04-12 분할: 기존 단일 `experiments.md` 를 실험 단위 16 파일 → 5 개
-> 분야 서브폴더 (filter / loss / self_training / eval / synthetic) 로 재편.
+> 2026-06-04 재편: v8(object-frame) 실험은 `archive/` 로 격리. 아래는 **camera-facing 0123 / 논문용(v1/v2 제외, 일반화)** 새 실험들.
+> 방향: CLAUDE.md "핵심 방향" + memory 4종. 검증할 주장: `_docs/method/{overview,step1~3,evaluation}.md`.
 
-## 폴더 구조
+## 실험 인덱스 (구분 / 논문 / 상태 / 의존)
 
 ```
-_docs/experiments/
-├── README.md                    # 인덱스 (this)
-├── model_catalog.md             # 모델 카탈로그 (cross-cutting)
-├── related_work.md              # T10 Related Work 비교 (cross-cutting)
-│
-├── filter/                      # 필터 관련 실험
-│   ├── ablation.md              # T1 Filter Ablation main
-│   ├── selection.md             # T3 Filter Selection P/R
-│   └── consensus_sweep.md       # T7 RANSAC consensus sweep
-│
-├── loss/                        # Loss / coord 관련 실험
-│   ├── ablation.md              # T2 Loss Ablation — coord contribution
-│   └── coord_strategy.md        # T4 Coord Loss 학습 전략 비교
-│
-├── self_training/               # Self-Training 루프 관련 실험
-│   ├── rounds.md                # F1 ST Round 수렴 Figure
-│   ├── alpha.md                 # T6 α (pseudo-label weight) 민감도
-│   └── forgetting.md            # T8 Catastrophic Forgetting
-│
-├── eval/                        # 최종 평가 / 실측 관련
-│   ├── seen_unseen.md           # T5 Real Seen vs Unseen
-│   ├── inference_speed.md       # Inference Speed breakdown
-│   └── qualitative.md           # Qualitative Failure Analysis
-│
-└── synthetic/                   # 합성 데이터 축
-    ├── multisource.md           # T9 Multi-source synthetic 비교 (legacy)
-    └── sigma_sensitivity.md     # Sigma Sensitivity (optional)
+#    파일                                    구분   논문    상태      의존
+──────────────────────────────────────────────────────────────────────────────────────
+A1   data/A1_paper_base_perf.md              다시   T       미시작    paper_base 학습
+A2   data/A2_squash_ratio_ablation.md        새로   T       미시작    paper_base ±squash
+A3   data/A3_truncation_padding_ablation.md  새로   T       미시작    paper_base ±padding
+B1   filter/pr_screening.md                  다시   T1      ★일부완료 ft_s2/pretrain (paper_base 재확인)
+B2   filter/B2_filter_selftraining.md        다시   T       미시작    paper_base, C1
+C1   self_training/C1_rounds.md              다시   ★F1     미시작    paper_base, 필터선정
+C2   self_training/C2_pl_quality_vs_quantity 다시   T       미시작    C1
+D1   eval/D1_generalization_seen_unseen.md   새로   T       미시작    paper_base, real GT
+D2   eval/D2_real_test.md                    다시   T       미시작    paper_base/r1, real GT
+D3   eval/D3_pnp_solver.md                   새로   T       부분      real GT (challenge 검증됨)
+F2   eval/F2_qualitative.md                  다시   F       미시작    위 실험들
+T10  related_work.md                         유지   T10     예정      논문 draft
 ```
 
-## 진행 상태 인덱스
+★ = 핵심 / 부분·일부완료 = 채울 데이터 일부 있음
+
+## 의존 순서 (실행 경로)
 
 ```
-#    파일                                    내용                                     상태
-──────────────────────────────────────────────────────────────────────────────────────────────
-—    README.md                               인덱스 + 평가 프로토콜 + 정책             —
-T1   filter/ablation.md                      Filter Ablation (T1 + F4/F5)              ★ 완료 (2026-04-14)
-T2   loss/ablation.md                        Loss Ablation — coord contribution         ★ 완료
-T3   filter/selection.md                     Filter Selection P/R (23 후보)             ★ 완료
-T4   loss/coord_strategy.md                  Coord Loss 학습 전략 비교                  ★ 완료 (v8 3-way)
-F1   self_training/rounds.md                 Single-Round Real-Only ft (F4/F5)         ★ 완료 (2026-04-14)
-T5   eval/seen_unseen.md                     Real Seen vs Unseen                       촬영 대기
-T6   self_training/alpha.md                  α (pseudo-label weight) 민감도             예정 (Phase 4)
-T7   filter/consensus_sweep.md               RANSAC consensus threshold sweep           ★ 완료
-T8   self_training/forgetting.md             Catastrophic Forgetting                    ★ 완료 (9 모델, forgetting 없음)
-—    eval/metric_validation.md               NN matching pipeline 무결성 검증            ★ 완료 (2026-04-14)
-—    eval/inference_speed.md                 Inference Speed breakdown                  ★ 완료 (26.7 FPS, RTX 3080)
-T9   synthetic/multisource.md                Multi-source synthetic 비교 (legacy)       부분 (v10 폐기, v8 기준)
-—    eval/qualitative.md                     Qualitative Failure Analysis               예정 (Phase 5)
-—    model_catalog.md                        모델 카탈로그                               갱신 (F3/F4/F5 추가)
-T10  related_work.md                         Related Work 비교 (Knitt / Mueller / Ours) 예정 (Phase 5)
-—    synthetic/sigma_sensitivity.md          Sigma Sensitivity                          optional
+[다른 머신] paper_base 학습
+      │
+      ├─→ A1 base 성능, A2 squash, A3 padding  (데이터/학습 검증)
+      ├─→ B1 필터 P/R 재확인 (paper_base)
+      │      │
+      │      └─→ 필터 선정 (outside diag / night diag∧ratio)
+      │             │
+      │             └─→ C1 self-training R0→R1→R2 ──→ B2 필터별 downstream
+      │                        │                       C2 PL 품질vs수량
+      │                        └─→ D1 일반화, D2 real test, D3 PnP, F2 정성
+      └─→ (논문 draft) T10 related work
 ```
 
-★ = 실측 완료
-
-## 평가 프로토콜 요약
+## Metric 정책 (camera-facing)
 
 ```
-1. Filter selection screening (GT-based P/R, frame-level)          → filter/selection.md
-   └─ capture0403middle 440 장 (2D projected_cuboid GT)
-
-2. Pseudo-label pool / self-training (no GT)                       → self_training/rounds.md
-   └─ capture0403noapril 188 장 (unlabeled pool)
-
-3. Primary model evaluation (2D reproj + PnP rate)                 → filter/ablation.md
-   └─ capture0403middle 440 장, 기준 reproj 50 px
-
-4. Real Seen / Unseen (AprilTag GT, ADD + 5 cm 5°)                 → eval/seen_unseen.md
+필터 P/R 스크리닝   통과 PL의 전체 9kp order-free(Hungarian) 평균오차 — 필터 목적=믿을만한 PL
+self-training       도메인별 per-frame 검출(NN<20px) + reproj(9kp)
+real 6D (dims known) ADD, 5cm5°, reproj — SQPnP, order-free
+주의                evaluate_on_val convention 버그 → order-free PnP 필수 (memory)
+                    monocular라 5cm5° 약함 → reproj median이 keypoint 품질 신호
 ```
 
-## 사용 Metric (상세 정의: `_docs/method/formulation.md` §10)
+## 데이터셋 정책
 
 ```
-Primary (2026-04-14~)   NN matching (Hungarian) raw kp vs GT projected_cuboid, per-frame <20px
-Primary (legacy)        PnP success rate, 2D mean reproj, Filter P/R/F1
-Secondary               ADD, 5 cm 5° (Real Seen / Unseen 만)
-Screening               PCK @ 3 px (synthetic val)
-Appendix                Volume ratio (본문 미사용)
+GT 평가셋     outside_combined(129) + night_combined(90) + forklift(32) + capture0403middle(440)
+제외          data/_eval_sets/_exclude.txt (1778652125245035520 = bad manual GT)
+unseen 정의   논문용은 v1/v2(내 파렛트) 제외 학습 → real 파렛트가 곧 unseen
+누수 주의     평가모델이 GT를 학습했는지 확인 (ft_s2=누수 / pretrain·paper_base=held-out)
 ```
-
-**Metric 변경 주의** (2026-04-13): 기존 PnP self-reproj / direct index 는 각각
-self-referential / convention-sensitive 문제로 폐기. 현행 NN matching pipeline
-의 무결성은 [`eval/metric_validation.md`](./eval/metric_validation.md) 에서
-4 test (T1~T4) 로 검증 완료.
-
-## 데이터셋 정책 (중요)
-
-**capture0403middle limitation** — object frame convention mismatch 로 3D
-ADD / 5 cm 5° 를 신뢰할 수 없다. 논문 본문 표 어디에도 이 데이터셋의 3D
-수치를 넣지 않는다. Primary metric 은 **2D reproj ≤ 50 px** 와 **PnP
-success rate**.
-
-Real Seen / Unseen (촬영 완료 후) 에서만 ADD, 5 cm 5° 를 primary 로 사용.
-
-## 공통 학습 설정 (ablation baseline)
-
-모든 v8_* ablation 은 아래 설정을 공유 — `project_ablation_baseline_setup.md`:
-
-```
-anchor      = weights/mixed_v8/final_net_epoch_0060.pth
-epochs      = 61 → 65  (5 epoch fine-tune)
-lr          = 5e-5
-batch       = 4
-imagesize   = 448
-sigma       = 4.0
-struct_coord = 0.003  (coord Huber, δ = 0.03)
-struct_edge  = 0.0
-struct_flip  = 0.0
-```
-
-새 ablation 은 `struct_edge` / `struct_flip` / 새 항 만 변경하고 나머지는
-유지 — 공정 비교 조건.
 
 ## 관련 폴더
-
-- `_docs/filter/` — 필터 전용 실험 (selection, consensus sweep, design rationale)
-- `_docs/method/` — 방법론 서술 (overview / step1~3 / formulation / implementation / generalization)
-- `_docs/models/` — 모델 카탈로그 원본 (카드 파일들)
-- `data/pallet/eval_results/` — 모든 평가 결과 JSON/CSV 원본
+- `_docs/method/` — 검증할 주장 (overview / step1~3 / evaluation)
+- `_docs/filter/` — 필터 전용 (pr_screening, survey)
+- `_docs/models/paper_base.md` — 논문 base 모델 명세
+- `data/pallet/eval_results/` — 평가 결과 원본
+- `archive/` — 폐기 v8 실험 (참고용)

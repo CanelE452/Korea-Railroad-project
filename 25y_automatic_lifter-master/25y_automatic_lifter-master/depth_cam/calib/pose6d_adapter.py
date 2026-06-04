@@ -191,3 +191,120 @@ def pose6d_to_align_vars_safe(R, t) -> Optional[Tuple[float, float, float]]:
         return pose6d_to_align_vars(R, t)
     except Exception:
         return None
+
+
+# -----------------------------------------------------------------------------
+# Depth scale 보정 — monocular PnP 의 scale 모호성을 RealSense depth 로 고정.
+#
+# 동기: monocular PnP 는 keypoint 비율만 보므로 절대 거리에 scale 오차가 있다
+#       (YOLO backend 에서 ~0.6m bias 관측). centroid 픽셀의 RealSense depth(m)
+#       는 광선 위 절대 거리이므로, t_m[2] 를 측정 depth 에 맞추도록 전체 t 를
+#       동일 비율로 스케일하면 거리 정확도가 확보된다.
+#
+# 기하: centroid 는 카메라 광선 (원점→centroid) 위의 점이다. PnP 의 t_m 과 진짜
+#       centroid 는 같은 광선을 공유하고 scale 만 다르므로, s = depth/t_m[2] 로
+#       t 전체를 곱하면 z 는 측정 depth 와 일치하고 x,y 는 같은 광선 비율로
+#       이동한다 (방향 R 은 불변, ψ 보존).
+# -----------------------------------------------------------------------------
+def depth_scale_correct(
+    t_m,
+    centroid_uv: Optional[Sequence[float]] = None,
+    depth_m: Optional[float] = None,
+    z_min_m: float = 0.10,
+    z_max_m: float = 12.0,
+) -> Tuple[Tuple[float, float, float], bool]:
+    """RealSense depth 로 monocular PnP 의 t 를 scale 보정.
+
+    Args:
+        t_m         : 3-vec (m), PnP 추정 centroid 위치 (camera frame, OpenCV).
+        centroid_uv : centroid 픽셀 (u, v). 로깅/유효성 표시용 (계산엔 미사용,
+                      depth_m 은 호출측에서 이미 샘플링해 전달).
+        depth_m     : centroid 픽셀의 RealSense depth (m). None/0/범위밖이면 무보정.
+        z_min_m     : depth 유효 최소 거리 (m).
+        z_max_m     : depth 유효 최대 거리 (m).
+
+    Returns:
+        (t_corrected, corrected_flag)
+        depth 유효 시  : (t_m * s, True),  s = depth_m / t_m[2]
+        depth 무효 시  : (t_m 원본, False)
+    """
+    tx, ty, tz = _to_3vec(t_m)
+    # depth 유효성 — None/비양수/범위밖, 또는 PnP z 가 0 에 가까우면 무보정.
+    valid = (
+        depth_m is not None
+        and depth_m > z_min_m
+        and depth_m < z_max_m
+        and abs(tz) > 1e-6
+    )
+    if not valid:
+        return (tx, ty, tz), False
+    s = float(depth_m) / float(tz)
+    return (tx * s, ty * s, tz * s), True
+
+
+# -----------------------------------------------------------------------------
+# 카메라 → 포크(차량) frame 고정 변환 골격.
+#
+# 카메라는 포크 중심에 있지 않으므로 pose 는 camera frame 이다. 실차 정렬은 포크
+# 기준이어야 하므로 고정 extrinsic 으로 옮긴다. 실측 전이므로 기본값은 항등
+# (CAM_TO_FORK_T=0, RPY=0) → 현재 동작과 완전히 동일 (회귀 없음).
+#
+#   T_fork_cam = [[R_cf, t_cf], [0,0,0,1]]  (camera frame → fork frame)
+#   pose_fork  = T_fork_cam @ pose_cam
+#   R_fork = R_cf @ R_cam
+#   t_fork = R_cf @ t_cam + t_cf
+#
+# ⚠ 실측 후 calib/config.py 의 CAM_TO_FORK_T / CAM_TO_FORK_RPY_DEG 값을 채울 것.
+# -----------------------------------------------------------------------------
+def _rpy_to_R(roll_deg: float, pitch_deg: float, yaw_deg: float) -> list:
+    """RPY(deg, OpenCV XYZ 고정축) → 3x3 회전행렬. R = Rz @ Ry @ Rx."""
+    r, p, y = (math.radians(roll_deg), math.radians(pitch_deg), math.radians(yaw_deg))
+    cr, sr = math.cos(r), math.sin(r)
+    cp, sp = math.cos(p), math.sin(p)
+    cy, sy = math.cos(y), math.sin(y)
+    # Rz(y) @ Ry(p) @ Rx(r)
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp,     cp * sr,                cp * cr],
+    ]
+
+
+def apply_cam_to_fork(
+    R,
+    t,
+    cam_to_fork_t: Optional[Sequence[float]] = None,
+    cam_to_fork_rpy_deg: Optional[Sequence[float]] = None,
+) -> Tuple[list, Tuple[float, float, float]]:
+    """camera frame pose (R, t) → fork frame pose (R_fork, t_fork).
+
+    OpenCV convention 유지. 기본값(0)이면 입력=출력(항등) — 회귀 없음.
+
+    Args:
+        R                   : 3x3 (pallet local axes in camera frame).
+        t                   : 3-vec (m), camera frame.
+        cam_to_fork_t       : [x, y, z] (m) camera→fork 오프셋. None → [0,0,0].
+        cam_to_fork_rpy_deg : [roll, pitch, yaw] (deg). None → [0,0,0].
+
+    Returns:
+        (R_fork (3x3 list), t_fork (3-vec)).
+    """
+    if cam_to_fork_t is None:
+        cam_to_fork_t = (0.0, 0.0, 0.0)
+    if cam_to_fork_rpy_deg is None:
+        cam_to_fork_rpy_deg = (0.0, 0.0, 0.0)
+    Rcf = _rpy_to_R(*[float(v) for v in cam_to_fork_rpy_deg])
+    tcf = [float(v) for v in cam_to_fork_t]
+    Rm = _to_3x3(R)
+    tx, ty, tz = _to_3vec(t)
+    # R_fork = Rcf @ Rm
+    R_fork = [
+        [sum(Rcf[i][k] * Rm[k][j] for k in range(3)) for j in range(3)]
+        for i in range(3)
+    ]
+    # t_fork = Rcf @ t + tcf
+    tv = (tx, ty, tz)
+    t_fork = tuple(
+        sum(Rcf[i][k] * tv[k] for k in range(3)) + tcf[i] for i in range(3)
+    )
+    return R_fork, t_fork

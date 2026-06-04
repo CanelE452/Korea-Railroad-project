@@ -1,0 +1,16 @@
+# YOLOv8-pose 학습 설정 (팔레트 9-keypoint, 100px padded)
+#
+# 합성 28K (mixed_v8 + v1 + v2) 에 padding 100px reflect 적용 → 840×680
+# truncation case 의 image 밖 keypoint 가 padded 안에 들어와 모두 v=2 로 학습됨
+# 이후 manual GT ft 와 입력 분포 일관 유지
+
+path: C:/Users/minjae/Documents/github/FoundationPose/challenge/data/yolo_pose_padded
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  0: pallet
+
+kpt_shape: [9, 3]
+flip_idx: [1, 0, 3, 2, 5, 4, 7, 6, 8]

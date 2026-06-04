@@ -57,6 +57,7 @@ STRUCT_FLIP=""
 STRUCT_EDGE=""
 STRUCT_COORD=""
 SYMMETRIC_LOSS=false
+TRUNCATION_AUG_PROB="0"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --finetune) FINETUNE=true; shift ;;
@@ -81,6 +82,7 @@ while [[ $# -gt 0 ]]; do
         --struct_edge) STRUCT_EDGE="$2"; shift 2 ;;
         --struct_coord) STRUCT_COORD="$2"; shift 2 ;;
         --symmetric_loss) SYMMETRIC_LOSS=true; shift ;;
+        --truncation_aug_prob) TRUNCATION_AUG_PROB="$2"; shift 2 ;;
         *) echo "[WARN] Unknown arg: $1"; shift ;;
     esac
 done
@@ -183,7 +185,8 @@ TRAIN_CMD="\"$PYTHON_EXE\" train.py \
     --outf \"../../$OUTPUT_DIR\" \
     --loginterval $LOG_INTERVAL \
     --workers $WORKERS \
-    --sigma $SIGMA"
+    --sigma $SIGMA \
+    --truncation_aug_prob $TRUNCATION_AUG_PROB"
 
 if $FINETUNE && [ -f "../../$NET_PATH" ]; then
     TRAIN_CMD="$TRAIN_CMD --net_path \"../../$NET_PATH\""
@@ -196,6 +199,10 @@ fi
 if $SYMMETRIC_LOSS; then
     TRAIN_CMD="$TRAIN_CMD --symmetric_loss"
     echo "[INFO] Symmetric loss enabled (180° front-back swap)"
+fi
+
+if [ "$TRUNCATION_AUG_PROB" != "0" ] && [ "$TRUNCATION_AUG_PROB" != "0.0" ]; then
+    echo "[INFO] On-the-fly truncation aug enabled (prob=$TRUNCATION_AUG_PROB)"
 fi
 
 if $GEO_LOSS; then
