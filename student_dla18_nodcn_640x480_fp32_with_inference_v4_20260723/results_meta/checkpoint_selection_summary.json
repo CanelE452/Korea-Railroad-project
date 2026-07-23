@@ -1,0 +1,481 @@
+{
+  "selection_metric": "car_detection_3D_AP_moderate",
+  "best": {
+    "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_final.pth",
+    "checkpoint_name": "model_final.pth",
+    "elapsed_seconds": 92.8963406085968,
+    "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final/run_eval_stdout.log",
+    "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final/inference/kitti_test/data",
+    "prediction_files": 3205,
+    "nonempty_prediction_files": 3077,
+    "car_2d_ap": {
+      "easy": 99.32923,
+      "moderate": 99.64159000000001,
+      "hard": 99.7037425
+    },
+    "car_bev_ap": {
+      "easy": 88.5449425,
+      "moderate": 91.548455,
+      "hard": 92.16463999999999
+    },
+    "car_3d_ap": {
+      "easy": 88.5449425,
+      "moderate": 91.548455,
+      "hard": 92.16463999999999
+    },
+    "selection_score": 91.548455
+  },
+  "best_checkpoint_copy": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/best_checkpoint/model_final.pth",
+  "ranked_checkpoints": [
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_final.pth",
+      "checkpoint_name": "model_final.pth",
+      "elapsed_seconds": 92.8963406085968,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3077,
+      "car_2d_ap": {
+        "easy": 99.32923,
+        "moderate": 99.64159000000001,
+        "hard": 99.7037425
+      },
+      "car_bev_ap": {
+        "easy": 88.5449425,
+        "moderate": 91.548455,
+        "hard": 92.16463999999999
+      },
+      "car_3d_ap": {
+        "easy": 88.5449425,
+        "moderate": 91.548455,
+        "hard": 92.16463999999999
+      },
+      "selection_score": 91.548455
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_final_ema.pth",
+      "checkpoint_name": "model_final_ema.pth",
+      "elapsed_seconds": 91.954598903656,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_final_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3079,
+      "car_2d_ap": {
+        "easy": 99.3399875,
+        "moderate": 99.6581725,
+        "hard": 99.7143125
+      },
+      "car_bev_ap": {
+        "easy": 88.2090275,
+        "moderate": 91.3957725,
+        "hard": 92.03537750000001
+      },
+      "car_3d_ap": {
+        "easy": 88.2090275,
+        "moderate": 91.3957725,
+        "hard": 92.03537750000001
+      },
+      "selection_score": 91.3957725
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0007000.pth",
+      "checkpoint_name": "model_0007000.pth",
+      "elapsed_seconds": 122.90700125694275,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0007000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0007000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3077,
+      "car_2d_ap": {
+        "easy": 99.3524025,
+        "moderate": 99.6592,
+        "hard": 99.709655
+      },
+      "car_bev_ap": {
+        "easy": 88.2592475,
+        "moderate": 91.3025775,
+        "hard": 91.9775775
+      },
+      "car_3d_ap": {
+        "easy": 88.2592475,
+        "moderate": 91.3025775,
+        "hard": 91.9775775
+      },
+      "selection_score": 91.3025775
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0007000_ema.pth",
+      "checkpoint_name": "model_0007000_ema.pth",
+      "elapsed_seconds": 105.29356098175049,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0007000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0007000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3080,
+      "car_2d_ap": {
+        "easy": 99.32912999999999,
+        "moderate": 99.64735749999998,
+        "hard": 99.70055500000001
+      },
+      "car_bev_ap": {
+        "easy": 88.0650725,
+        "moderate": 91.27246,
+        "hard": 91.94937250000001
+      },
+      "car_3d_ap": {
+        "easy": 88.0650725,
+        "moderate": 91.27246,
+        "hard": 91.94937250000001
+      },
+      "selection_score": 91.27246
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0006000.pth",
+      "checkpoint_name": "model_0006000.pth",
+      "elapsed_seconds": 91.74648332595825,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0006000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0006000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3078,
+      "car_2d_ap": {
+        "easy": 99.35531750000001,
+        "moderate": 99.6641475,
+        "hard": 99.7255475
+      },
+      "car_bev_ap": {
+        "easy": 87.27970499999999,
+        "moderate": 90.7689875,
+        "hard": 91.5631775
+      },
+      "car_3d_ap": {
+        "easy": 87.27970499999999,
+        "moderate": 90.7689875,
+        "hard": 91.5631775
+      },
+      "selection_score": 90.7689875
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0006000_ema.pth",
+      "checkpoint_name": "model_0006000_ema.pth",
+      "elapsed_seconds": 98.93075799942017,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0006000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0006000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3084,
+      "car_2d_ap": {
+        "easy": 99.3941875,
+        "moderate": 99.694225,
+        "hard": 99.74309500000001
+      },
+      "car_bev_ap": {
+        "easy": 86.75976000000001,
+        "moderate": 90.4317975,
+        "hard": 91.20563250000001
+      },
+      "car_3d_ap": {
+        "easy": 86.75976000000001,
+        "moderate": 90.4317975,
+        "hard": 91.20563250000001
+      },
+      "selection_score": 90.4317975
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0005000_ema.pth",
+      "checkpoint_name": "model_0005000_ema.pth",
+      "elapsed_seconds": 111.86757326126099,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0005000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0005000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3087,
+      "car_2d_ap": {
+        "easy": 99.27106500000001,
+        "moderate": 99.62009,
+        "hard": 99.676605
+      },
+      "car_bev_ap": {
+        "easy": 83.60024750000001,
+        "moderate": 89.9433775,
+        "hard": 90.79615000000001
+      },
+      "car_3d_ap": {
+        "easy": 83.60024750000001,
+        "moderate": 89.9433775,
+        "hard": 90.79615000000001
+      },
+      "selection_score": 89.9433775
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0005000.pth",
+      "checkpoint_name": "model_0005000.pth",
+      "elapsed_seconds": 91.57854437828064,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0005000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0005000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3081,
+      "car_2d_ap": {
+        "easy": 99.2999625,
+        "moderate": 99.631155,
+        "hard": 99.691
+      },
+      "car_bev_ap": {
+        "easy": 85.4153975,
+        "moderate": 89.75181500000001,
+        "hard": 90.68511
+      },
+      "car_3d_ap": {
+        "easy": 85.331805,
+        "moderate": 89.70567,
+        "hard": 90.636485
+      },
+      "selection_score": 89.70567
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0004000.pth",
+      "checkpoint_name": "model_0004000.pth",
+      "elapsed_seconds": 94.05299925804138,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0004000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0004000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3071,
+      "car_2d_ap": {
+        "easy": 99.20330500000001,
+        "moderate": 99.59244999999999,
+        "hard": 99.66251500000001
+      },
+      "car_bev_ap": {
+        "easy": 81.7860125,
+        "moderate": 86.4604875,
+        "hard": 87.48630499999999
+      },
+      "car_3d_ap": {
+        "easy": 81.7860125,
+        "moderate": 86.4604875,
+        "hard": 87.48630499999999
+      },
+      "selection_score": 86.4604875
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0004000_ema.pth",
+      "checkpoint_name": "model_0004000_ema.pth",
+      "elapsed_seconds": 105.74500751495361,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0004000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0004000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3078,
+      "car_2d_ap": {
+        "easy": 99.04968999999998,
+        "moderate": 99.51383249999999,
+        "hard": 99.58548
+      },
+      "car_bev_ap": {
+        "easy": 74.7017425,
+        "moderate": 81.18086,
+        "hard": 82.49179
+      },
+      "car_3d_ap": {
+        "easy": 74.7017425,
+        "moderate": 81.18086,
+        "hard": 82.49179
+      },
+      "selection_score": 81.18086
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0003125.pth",
+      "checkpoint_name": "model_0003125.pth",
+      "elapsed_seconds": 98.79839611053467,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003125/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003125/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3061,
+      "car_2d_ap": {
+        "easy": 95.22244,
+        "moderate": 96.15935499999999,
+        "hard": 96.236155
+      },
+      "car_bev_ap": {
+        "easy": 56.93741,
+        "moderate": 65.119085,
+        "hard": 66.8443025
+      },
+      "car_3d_ap": {
+        "easy": 56.93741,
+        "moderate": 65.119085,
+        "hard": 66.8443025
+      },
+      "selection_score": 65.119085
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0003000_ema.pth",
+      "checkpoint_name": "model_0003000_ema.pth",
+      "elapsed_seconds": 96.14756512641907,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3038,
+      "car_2d_ap": {
+        "easy": 95.546975,
+        "moderate": 96.50268750000001,
+        "hard": 96.649625
+      },
+      "car_bev_ap": {
+        "easy": 53.791835,
+        "moderate": 61.70851,
+        "hard": 64.0974525
+      },
+      "car_3d_ap": {
+        "easy": 53.791835,
+        "moderate": 61.70851,
+        "hard": 64.0974525
+      },
+      "selection_score": 61.70851
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0003125_ema.pth",
+      "checkpoint_name": "model_0003125_ema.pth",
+      "elapsed_seconds": 90.9507327079773,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003125_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003125_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3052,
+      "car_2d_ap": {
+        "easy": 95.796945,
+        "moderate": 99.02835,
+        "hard": 99.17790249999999
+      },
+      "car_bev_ap": {
+        "easy": 53.9094575,
+        "moderate": 61.637209999999996,
+        "hard": 63.89785
+      },
+      "car_3d_ap": {
+        "easy": 53.9094575,
+        "moderate": 61.637209999999996,
+        "hard": 63.89785
+      },
+      "selection_score": 61.637209999999996
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0002000.pth",
+      "checkpoint_name": "model_0002000.pth",
+      "elapsed_seconds": 107.80792284011841,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0002000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0002000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 2953,
+      "car_2d_ap": {
+        "easy": 91.12716750000001,
+        "moderate": 92.74781250000001,
+        "hard": 92.971925
+      },
+      "car_bev_ap": {
+        "easy": 37.5508525,
+        "moderate": 45.449267500000005,
+        "hard": 47.59387
+      },
+      "car_3d_ap": {
+        "easy": 37.5508525,
+        "moderate": 45.449267500000005,
+        "hard": 47.59387
+      },
+      "selection_score": 45.449267500000005
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0003000.pth",
+      "checkpoint_name": "model_0003000.pth",
+      "elapsed_seconds": 102.71912598609924,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0003000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 3024,
+      "car_2d_ap": {
+        "easy": 90.85337750000001,
+        "moderate": 95.047065,
+        "hard": 93.0818725
+      },
+      "car_bev_ap": {
+        "easy": 26.704095,
+        "moderate": 28.343629999999997,
+        "hard": 28.5939375
+      },
+      "car_3d_ap": {
+        "easy": 26.704095,
+        "moderate": 28.343629999999997,
+        "hard": 28.5939375
+      },
+      "selection_score": 28.343629999999997
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0002000_ema.pth",
+      "checkpoint_name": "model_0002000_ema.pth",
+      "elapsed_seconds": 99.36623811721802,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0002000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0002000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 2502,
+      "car_2d_ap": {
+        "easy": 71.85529,
+        "moderate": 76.89991,
+        "hard": 77.3110575
+      },
+      "car_bev_ap": {
+        "easy": 13.439320000000002,
+        "moderate": 20.972089999999998,
+        "hard": 23.3184475
+      },
+      "car_3d_ap": {
+        "easy": 13.439320000000002,
+        "moderate": 20.972089999999998,
+        "hard": 23.3184475
+      },
+      "selection_score": 20.972089999999998
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0001000.pth",
+      "checkpoint_name": "model_0001000.pth",
+      "elapsed_seconds": 86.52739691734314,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0001000/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0001000/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 2079,
+      "car_2d_ap": {
+        "easy": 65.458855,
+        "moderate": 67.2529375,
+        "hard": 65.47043500000001
+      },
+      "car_bev_ap": {
+        "easy": 16.0058325,
+        "moderate": 20.804705000000002,
+        "hard": 20.7951025
+      },
+      "car_3d_ap": {
+        "easy": 16.0058325,
+        "moderate": 20.804705000000002,
+        "hard": 20.7951025
+      },
+      "selection_score": 20.804705000000002
+    },
+    {
+      "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/seed_42/model_0001000_ema.pth",
+      "checkpoint_name": "model_0001000_ema.pth",
+      "elapsed_seconds": 88.08889889717102,
+      "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0001000_ema/run_eval_stdout.log",
+      "prediction_dir": "results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/checkpoint_evals/model_0001000_ema/inference/kitti_test/data",
+      "prediction_files": 3205,
+      "nonempty_prediction_files": 505,
+      "car_2d_ap": {
+        "easy": 6.919014999999999,
+        "moderate": 6.2330575,
+        "hard": 5.14321
+      },
+      "car_bev_ap": {
+        "easy": 0.05911,
+        "moderate": 0.089285,
+        "hard": 0.089285
+      },
+      "car_3d_ap": {
+        "easy": 0.05911,
+        "moderate": 0.089285,
+        "hard": 0.089285
+      },
+      "selection_score": 0.089285
+    }
+  ]
+}

@@ -10,6 +10,17 @@ import os as _os
 _CONFIG_DIR = _Path(__file__).resolve().parent
 _REPO_ROOT = _CONFIG_DIR.parents[3]
 
+
+def _env_int(name: str, default: int) -> int:
+    value = _os.environ.get(name)
+    if value is None or value.strip() == "":
+        return int(default)
+    try:
+        return int(value)
+    except ValueError:
+        print(f"[config] ignoring invalid {name}={value!r}; using {default}")
+        return int(default)
+
 # ===== 모델 & 감지 =====
 MODEL_PATH = 'runs/segment/y11n_seg_finetune/weights/last.pt'  # 실제 가중치 경로에 맞춰 확인 필요
 FRONT_CLASS_NAME = "front"
@@ -58,7 +69,7 @@ def _resolve_model_path_6d():
 
 MODEL_PATH_6D = _resolve_model_path_6d()
 # DOPE 입력 height (run_live.py 와 동일하게 400). VGG stride 호환 위해 width 는 자동 정렬.
-DOPE_INPUT_HEIGHT = 400
+DOPE_INPUT_HEIGHT = _env_int("DOPE_INPUT_HEIGHT", 400)
 # belief map peak confidence 임계 — challenge/config/task.yaml 의 belief.threshold 와 동일.
 DOPE_PEAK_THRESHOLD = 0.30
 DOPE_PEAK_SIGMA = 3.0

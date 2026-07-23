@@ -1,0 +1,71 @@
+{
+  "dataset_name": "inference_v4",
+  "created_at_epoch": 1779950743.7744262,
+  "reference_dataset": "/Users/doyoung/Documents/Blender/datasets/real_v4 3",
+  "format": "smoke_kitti_native_640x480",
+  "image_width": 640,
+  "image_height": 480,
+  "image_mode": "RGB PNG via OpenCV BGR PNG encoding",
+  "affine_1920x1080_to_640x480": [
+    [
+      0.44444443698451497,
+      0.0,
+      -106.66668667221768
+    ],
+    [
+      0.0,
+      0.44444443698451497,
+      1.1083509377840528e-05
+    ]
+  ],
+  "calib_template_source": "/Users/doyoung/Documents/Blender/datasets/real_v4 3/training/calib/000000.txt",
+  "label_note": "Dummy Car labels are included so SMOKE geometry inference can read h_cam and dimensions; bbox/location z/yaw are not ground truth.",
+  "camera_height_rule": "camera_height_m = laser_distance_m + 0.03",
+  "label_dimensions_kitti_hwl": [
+    2.0,
+    1.75,
+    5.15
+  ],
+  "total_frames": 9430,
+  "sessions": [
+    {
+      "session_name": "추론용",
+      "source_dir": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용",
+      "original_video": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용/original.mp4",
+      "manifest": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용/manifest.json",
+      "csv_rows": 3874,
+      "video_frame_count_reported_by_opencv": 3874,
+      "written_frames": 3874,
+      "dropped_frames": [],
+      "camera_height_m_min": 0.7000000000000001,
+      "camera_height_m_max": 0.75,
+      "camera_height_m_median": 0.73
+    },
+    {
+      "session_name": "추론용2",
+      "source_dir": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용2",
+      "original_video": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용2/original.mp4",
+      "manifest": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용2/manifest.json",
+      "csv_rows": 3085,
+      "video_frame_count_reported_by_opencv": 3085,
+      "written_frames": 3085,
+      "dropped_frames": [],
+      "camera_height_m_min": 0.91,
+      "camera_height_m_max": 0.93,
+      "camera_height_m_median": 0.92
+    },
+    {
+      "session_name": "추론용3",
+      "source_dir": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용3",
+      "original_video": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용3/original.mp4",
+      "manifest": "/Users/doyoung/Documents/Blender/results/realsense_laser_recordings/추론용3/manifest.json",
+      "csv_rows": 2471,
+      "video_frame_count_reported_by_opencv": 2471,
+      "written_frames": 2471,
+      "dropped_frames": [],
+      "camera_height_m_min": 0.9,
+      "camera_height_m_max": 0.92,
+      "camera_height_m_median": 0.91
+    }
+  ]
+}

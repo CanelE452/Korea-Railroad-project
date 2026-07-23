@@ -1,0 +1,6 @@
+timestamp,laser_distance_m,camera_height_m,detection_count,best_score,best_x_m,best_y_m,best_z_m,best_rotation_y_rad,inference_ms
+1784792086.234386,,,0,,,,,,0.0
+1784792086.346436,,,0,,,,,,0.0
+1784792086.476507,,,0,,,,,,0.0
+1784792086.589468,,,0,,,,,,0.0
+1784792086.723750,,,0,,,,,,0.0

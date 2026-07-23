@@ -1,0 +1,37 @@
+{
+  "bundle_name": "student_dla18_nodcn_640x480_fp32_with_inference_v4_20260723",
+  "created_for": "student DLA-18 no-DCN FP32 inference with bundled inference_v4 dataset",
+  "default_entrypoint": "run_inference_included_v4.sh",
+  "model": {
+    "input_size": [640, 480],
+    "mode": "geometry_v2",
+    "backbone": "DLA-18-NODCN",
+    "head_channels": 128,
+    "checkpoint": "weights/model_final.pth",
+    "config_file": "SMOKE-master/configs/smoke_geometry_v2_real_v4_distill_dla18_nodcn_640x480.yaml",
+    "default_fp16": false
+  },
+  "dataset": {
+    "name": "inference_v4",
+    "path": "datasets/inference_v4",
+    "default_subdir": "testing",
+    "default_split": "test",
+    "image_count": 9430
+  },
+  "selection": {
+    "validation_split": "datasets/real_v4/training/ImageSets/distill_val.txt",
+    "selection_metric": "Car 3D moderate AP",
+    "best_checkpoint_name": "model_final.pth",
+    "best_score": 91.548455
+  },
+  "inference_v4_fp32": {
+    "prediction_files": 9430,
+    "nonempty_prediction_files": 7864,
+    "elapsed_seconds": 212.45292401313782
+  },
+  "speed": {
+    "pytorch_synthetic_fp32_student_fps": 120.7349806089374,
+    "pytorch_synthetic_fp16_student_fps": 83.16321970677984,
+    "pytorch_synthetic_teacher_fps": 43.47680781195838
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "checkpoint": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/real_v4_distill_dla18_nodcn_640x480/selection_seed_42/best_checkpoint/model_final.pth",
+  "config_file": "configs/smoke_geometry_v2_real_v4_distill_dla18_nodcn_640x480.yaml",
+  "dataset_root": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/datasets/real_v4",
+  "dataset_subdir": "training",
+  "split": "distill_val",
+  "fp16": true,
+  "skip_kitti_eval": false,
+  "output_dir": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/validation_v4_fp16_distill_dla18_nodcn_640x480/model_final",
+  "prediction_dir": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/validation_v4_fp16_distill_dla18_nodcn_640x480/model_final/inference/kitti_test/data",
+  "prediction_zip": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/validation_v4_fp16_distill_dla18_nodcn_640x480/model_final/inference/kitti_test/validation_v4_predictions_model_final_fp16.zip",
+  "prediction_files": 3205,
+  "nonempty_prediction_files": 3077,
+  "elapsed_seconds": 117.8799638748169,
+  "stdout_log": "/home/dy-jang/projects/TruckDetection-main/smoke_geometry_v2_training_bundle_20260528/results/validation_v4_fp16_distill_dla18_nodcn_640x480/model_final/run_inference_stdout.log"
+}
