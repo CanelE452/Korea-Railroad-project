@@ -1,0 +1,25 @@
+{
+  "package_name": "geometry_v2_live_camera_laser_ready_20260723",
+  "created_date": "2026-07-23",
+  "entrypoint": "run_live_windows.cmd",
+  "setup_entrypoint": "setup_live_windows.cmd",
+  "model": {
+    "mode": "geometry_v2",
+    "backbone": "DLA-18-NODCN",
+    "input_size": [
+      640,
+      480
+    ],
+    "checkpoint": "weights/model_final.pth",
+    "checkpoint_sha256": "9F10CC536B387E34DF48CD7801777FCB6E0AB1588C85765BC3FFE0418C945331"
+  },
+  "devices": {
+    "default_camera_id": 1,
+    "default_laser_port": "COM6",
+    "default_laser_baud": 115200,
+    "default_laser_channel": 1
+  },
+  "camera_height_rule": "camera_height_m = valid L1 laser distance_m",
+  "fallback_camera_height": null,
+  "dataset_included": false
+}

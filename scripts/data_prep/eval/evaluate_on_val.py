@@ -40,7 +40,6 @@ from scipy.ndimage import gaussian_filter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "Deep_Object_Pose", "common"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "Deep_Object_Pose", "train"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "self_training"))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "challenge", "scripts"))
 
 try:
     from models import DopeNetwork

@@ -17,10 +17,8 @@ scripts/
 │   ├── eval/                        모델 평가 + 필터 P/R (4 files)
 │   ├── visualize/                   Annotation / Pretrain 시각화 (2 files)
 │   ├── validate/                    데이터 검증 / 병합 (2 files)
-│   ├── inference/                   Pseudo-label 생성 v1~v4 (6 files, legacy)
-│   ├── ablation/                    Loss / pnp ablation 분석 (3 files)
-│   ├── filter_compare/              옛 filter 비교 (3 files, legacy)
-│   └── debug/                       1회성 디버그 `_` prefix (14 files)
+│   ├── inference/                   Pseudo-label 생성 (v4 canonical + 보조 2)
+│   └── ablation/                    Loss / pnp ablation 분석 (3 files)
 │
 ├── self_training/                   ← PyTorch Self-Training (conda: pallet-pose)
 │   ├── self_train.py                메인 루프 (filter_type dispatcher)
@@ -36,6 +34,9 @@ scripts/
 ├── train_dope.sh                    ← DOPE 학습 진입점 (conda: pallet-pose)
 ├── launch_tensorboard.py
 └── compare_experiments.py           실험 비교 유틸
+
+※ 2026-07-23 정리: 미등록 일회성 분석/그림 스크립트 25 + legacy(inference v1~v3,
+  filter_compare) 6 + upload/기타 유틸 9 = 40개 삭제.
 ```
 
 **중요**: `data_prep/` 서브폴더 (apriltag / inference / ablation / filter_compare /

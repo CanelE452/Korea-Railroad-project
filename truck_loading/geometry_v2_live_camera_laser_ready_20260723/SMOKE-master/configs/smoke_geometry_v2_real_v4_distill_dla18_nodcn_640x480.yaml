@@ -1,0 +1,45 @@
+MODEL:
+  WEIGHT: ""
+  BACKBONE:
+    CONV_BODY: "DLA-18-NODCN"
+  SMOKE_HEAD:
+    MODE: "geometry_v2"
+    REGRESSION_HEADS: 4
+    REGRESSION_CHANNEL: (1, 1, 2)
+    NUM_CHANNEL: 128
+    DIMENSION_REFERENCE: ((5.16, 1.97, 1.74),)
+    DEPTH_REFERENCE: (6.79, 2.32)
+    REGRESSION_LOSS: "SmoothL1"
+    SMOOTH_L1_BETA: 1.0
+INPUT:
+  WIDTH_TRAIN: 640
+  HEIGHT_TRAIN: 480
+  WIDTH_TEST: 640
+  HEIGHT_TEST: 480
+  FLIP_PROB_TRAIN: 0.5
+  SHIFT_SCALE_PROB_TRAIN: 0.3
+DATASETS:
+  DETECT_CLASSES: ("Car",)
+  TRAIN: ("kitti_train",)
+  TEST: ("kitti_test",)
+  TRAIN_SPLIT: "distill_train"
+  TEST_SPLIT: "distill_val"
+SOLVER:
+  OPTIMIZER: "AdamW"
+  BASE_LR: 2.5e-4
+  WEIGHT_DECAY: 1.0e-4
+  STEPS: (3125, 5000)
+  MAX_ITERATION: 7500
+  CHECKPOINT_PERIOD: 1000
+  IMS_PER_BATCH: 32
+  RESUME: False
+  LOAD_OPTIMIZER_SCHEDULER: False
+  USE_EMA: True
+  EMA_DECAY: 0.999
+DISTILL:
+  ENABLED: True
+  TEACHER_CONFIG: "configs/smoke_geometry_v2_sample_v4_robust_640x480.yaml"
+  TEACHER_WEIGHT: "../results/real_v4_random_val_checkpoint_selection_20260531/best_checkpoint/model_final.pth"
+  HM_WEIGHT: 1.0
+  REG_WEIGHT: 2.0
+  GT_WEIGHT: 1.0

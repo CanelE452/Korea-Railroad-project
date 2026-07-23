@@ -1,0 +1,458 @@
+flowchart TB
+
+%% =========================================================
+%% 0. 시스템 정의
+%% =========================================================
+subgraph CONFIG["0. 시스템 구성 및 제어 기준"]
+    direction LR
+
+    CFG1["센서 구성<br/><br/>
+    Camera 1: 차체 전면부 중앙<br/>
+    Camera 2: 오른쪽 포크 전면부<br/>
+    Laser L/R: 각 포크 후단 하부"]
+
+    CFG2["팔레트 상태변수 기준<br/><br/>
+    지게차: 차체 전면부 중앙<br/>
+    팔레트: 팔레트 전면부 중앙<br/>
+    2D Bird's-eye View"]
+
+    CFG3["트럭 상태변수 기준<br/><br/>
+    지게차: 포크 전면부 중앙<br/>
+    트럭: 적재면 옆면부 중앙<br/>
+    2D Bird's-eye View"]
+
+    CFG4["고정 제어 상수<br/><br/>
+    PALLET_LIFT = 0.20 m<br/>
+    TRUCK_HEIGHT = 1.50 m<br/>
+    SAFETY_MARGIN = 0.50 m<br/>
+    FORK_LENGTH = 1.00 m<br/>
+    RELEASE_THRESHOLD = 0.05 m"]
+
+    CFG5["공통 상태변수<br/><br/>
+    forward: 전후 거리<br/>
+    lateral: 좌우 거리<br/>
+    yaw: 기준 평면 사이 각도<br/>
+    yaw = wrapToPi(θtarget - θforklift)"]
+end
+
+%% =========================================================
+%% 1. 시스템 초기화
+%% =========================================================
+subgraph INIT["1. 시스템 초기화"]
+    direction LR
+
+    I0(["I0<br/>SYSTEM_START"])
+
+    I1["I1<br/>LOAD_CONFIGURATION<br/>
+    고정 상수 및 좌표 변환 불러오기"]
+
+    I2["I2<br/>INITIALIZE_SENSORS<br/>
+    Camera 1 / Camera 2<br/>
+    Laser L / Laser R"]
+
+    ID0{"ID0<br/>모든 센서가<br/>준비되었는가?"}
+
+    I3["I3<br/>INITIALIZE_ACTUATORS<br/>
+    주행·회전·포크 제어기 초기화"]
+
+    I4["I4<br/>SET_OPERATION_MODE<br/>
+    mode = PALLET_PICKUP"]
+end
+
+I0 --> I1 --> I2 --> ID0
+ID0 -- "아니오" --> I2
+ID0 -- "예" --> I3 --> I4
+
+%% =========================================================
+%% 2. 전체 작업 FSM
+%% =========================================================
+subgraph MAIN["2. 전체 작업 FSM"]
+    direction LR
+
+    %% =====================================================
+    %% PHASE A
+    %% =====================================================
+    subgraph PALLET["Phase A — PALLET_PICKUP"]
+        direction TB
+
+        %% -----------------------------
+        %% A-1. 인식 및 상태 계산
+        %% -----------------------------
+        subgraph PA1["A-1. 팔레트 인식 및 상태변수 계산"]
+            direction LR
+
+            P0["P0<br/>PALLET_CAPTURE<br/>
+            Camera 1 프레임 획득"]
+
+            PD0{"PD0<br/>프레임이<br/>유효한가?"}
+
+            P1["P1<br/>PALLET_POSE_INFERENCE<br/>
+            팔레트 탐지 모델 실행<br/>
+            T_cam1_pallet 추정"]
+
+            PD1{"PD1<br/>팔레트 6D pose가<br/>유효한가?"}
+
+            P2["P2<br/>PALLET_FRAME_TRANSFORM<br/>
+            T_body_pallet =<br/>
+            T_body_cam1 × T_cam1_pallet"]
+
+            P3["P3<br/>EXTRACT_PALLET_REFERENCE<br/>
+            차체 전면부 중앙<br/>
+            팔레트 전면부 중앙"]
+
+            P4["P4<br/>PROJECT_TO_2D<br/>
+            높이축 제거<br/>
+            Bird's-eye View 투영"]
+
+            P5["P5<br/>COMPUTE_PALLET_STATE<br/>
+            forward_pallet<br/>
+            lateral_pallet<br/>
+            yaw_pallet"]
+        end
+
+        P0 --> PD0
+        PD0 -- "아니오" --> P0
+        PD0 -- "예" --> P1
+
+        P1 --> PD1
+        PD1 -- "아니오" --> P0
+        PD1 -- "예" --> P2
+
+        P2 --> P3 --> P4 --> P5
+
+        %% -----------------------------
+        %% A-2. Manhattan 접근
+        %% -----------------------------
+        subgraph PA2["A-2. Manhattan-style 팔레트 접근"]
+            direction LR
+
+            P6["P6<br/>SELECT_LATERAL_HEADING<br/>
+            lateral 부호에 따라<br/>
+            측면 이동 방향 선택"]
+
+            P7["P7<br/>COMPUTE_LATERAL_ROTATION<br/>
+            yaw_to_lateral 계산<br/>
+            wrapToPi 적용"]
+
+            PD2{"PD2<br/>yaw_to_lateral<br/>부호는?"}
+
+            P8L["P8_CCW<br/>ROTATE_CCW<br/>
+            반시계 방향<br/>
+            abs(yaw_to_lateral)"]
+
+            P8R["P8_CW<br/>ROTATE_CW<br/>
+            시계 방향<br/>
+            abs(yaw_to_lateral)"]
+
+            P9["P9<br/>MOVE_LATERAL_DISTANCE<br/>
+            move_forward<br/>
+            abs(lateral_pallet)"]
+
+            P10["P10<br/>COMPUTE_FACE_ROTATION<br/>
+            팔레트와 마주보는<br/>
+            목표 방향 계산"]
+
+            PD3{"PD3<br/>yaw_to_face<br/>부호는?"}
+
+            P11L["P11_CCW<br/>ROTATE_CCW_TO_FACE<br/>
+            반시계 방향 회전<br/>
+            일반적으로 90°"]
+
+            P11R["P11_CW<br/>ROTATE_CW_TO_FACE<br/>
+            시계 방향 회전<br/>
+            일반적으로 90°"]
+        end
+
+        P5 --> P6 --> P7 --> PD2
+
+        PD2 -- "yaw ≥ 0" --> P8L
+        PD2 -- "yaw < 0" --> P8R
+
+        P8L --> P9
+        P8R --> P9
+
+        P9 --> P10 --> PD3
+
+        PD3 -- "yaw ≥ 0" --> P11L
+        PD3 -- "yaw < 0" --> P11R
+
+        %% -----------------------------
+        %% A-3. 삽입 및 픽업
+        %% -----------------------------
+        subgraph PA3["A-3. 포크 삽입 및 팔레트 픽업"]
+            direction LR
+
+            P12["P12<br/>MOVE_TO_PALLET<br/>
+            move_forward<br/>
+            forward_pallet"]
+
+            PD4{"PD4<br/>forward_pallet<br/>= 0 인가?"}
+
+            P13["P13<br/>FORK_INSERTED<br/>
+            차체 전면부와 팔레트 전면부 도달<br/>
+            포크 삽입 완료"]
+
+            P14["P14<br/>LIFT_PALLET<br/>
+            lift_fork(+0.20 m)"]
+
+            PD5{"PD5<br/>상승 높이가<br/>0.20 m인가?"}
+
+            P15["P15<br/>PALLET_PICKUP_COMPLETE<br/>
+            pallet_picked = true"]
+        end
+
+        P11L --> P12
+        P11R --> P12
+
+        P12 --> PD4
+        PD4 -- "아니오" --> P12
+        PD4 -- "예" --> P13
+
+        P13 --> P14 --> PD5
+        PD5 -- "아니오" --> P14
+        PD5 -- "예" --> P15
+    end
+
+    %% =====================================================
+    %% PHASE B
+    %% =====================================================
+    subgraph TRUCK["Phase B — TRUCK_LOADING"]
+        direction TB
+
+        %% -----------------------------
+        %% B-1. 인식 및 상태 계산
+        %% -----------------------------
+        subgraph TB1["B-1. 트럭 인식 및 상태변수 계산"]
+            direction LR
+
+            T0["T0<br/>SWITCH_SENSOR_INPUT<br/>
+            Camera 2 활성화<br/>
+            Laser L/R 활성화"]
+
+            T1["T1<br/>TRUCK_SENSOR_CAPTURE<br/>
+            Camera 2 영상<br/>
+            Laser L/R 거리 획득"]
+
+            TD0{"TD0<br/>모든 입력이<br/>유효한가?"}
+
+            T2["T2<br/>TRUCK_POSE_INFERENCE<br/>
+            트럭 탐지 모델 실행<br/>
+            T_cam2_truck 추정"]
+
+            TD1{"TD1<br/>트럭 6D pose가<br/>유효한가?"}
+
+            T3["T3<br/>TRUCK_FRAME_TRANSFORM<br/>
+            T_fork_truck =<br/>
+            T_fork_cam2 × T_cam2_truck"]
+
+            T4["T4<br/>EXTRACT_LOADING_TARGET<br/>
+            트럭 전체 pose에서<br/>
+            적재면 옆면부 중앙 추출"]
+
+            T5["T5<br/>PROJECT_TO_2D<br/>
+            높이축 제거<br/>
+            Bird's-eye View 투영"]
+
+            T6["T6<br/>COMPUTE_TRUCK_STATE<br/>
+            forward_truck<br/>
+            lateral_truck<br/>
+            yaw_truck"]
+        end
+
+        T0 --> T1 --> TD0
+        TD0 -- "아니오" --> T1
+        TD0 -- "예" --> T2
+
+        T2 --> TD1
+        TD1 -- "아니오" --> T1
+        TD1 -- "예" --> T3
+
+        T3 --> T4 --> T5 --> T6
+
+        %% -----------------------------
+        %% B-2. Manhattan 접근
+        %% -----------------------------
+        subgraph TB2["B-2. Manhattan-style 트럭 접근"]
+            direction LR
+
+            T7["T7<br/>SELECT_LATERAL_HEADING<br/>
+            lateral 부호에 따라<br/>
+            측면 이동 방향 선택"]
+
+            T8["T8<br/>COMPUTE_LATERAL_ROTATION<br/>
+            yaw_to_lateral 계산<br/>
+            wrapToPi 적용"]
+
+            TD2{"TD2<br/>yaw_to_lateral<br/>부호는?"}
+
+            T9L["T9_CCW<br/>ROTATE_CCW<br/>
+            반시계 방향 회전"]
+
+            T9R["T9_CW<br/>ROTATE_CW<br/>
+            시계 방향 회전"]
+
+            T10["T10<br/>MOVE_TRUCK_LATERAL<br/>
+            move_forward<br/>
+            abs(lateral_truck)"]
+
+            T11["T11<br/>COMPUTE_FACE_ROTATION<br/>
+            적재면 옆면부 중앙과<br/>
+            마주보는 방향 계산"]
+
+            TD3{"TD3<br/>yaw_to_face<br/>부호는?"}
+
+            T12L["T12_CCW<br/>ROTATE_CCW_TO_TRUCK<br/>
+            반시계 방향 회전<br/>
+            일반적으로 90°"]
+
+            T12R["T12_CW<br/>ROTATE_CW_TO_TRUCK<br/>
+            시계 방향 회전<br/>
+            일반적으로 90°"]
+
+            T13["T13<br/>MOVE_TO_SAFETY_POINT<br/>
+            move_forward<br/>
+            forward_truck - 0.50 m"]
+        end
+
+        T6 --> T7 --> T8 --> TD2
+
+        TD2 -- "yaw ≥ 0" --> T9L
+        TD2 -- "yaw < 0" --> T9R
+
+        T9L --> T10
+        T9R --> T10
+
+        T10 --> T11 --> TD3
+
+        TD3 -- "yaw ≥ 0" --> T12L
+        TD3 -- "yaw < 0" --> T12R
+
+        T12L --> T13
+        T12R --> T13
+
+        %% -----------------------------
+        %% B-3. 적재면 탐색
+        %% -----------------------------
+        subgraph TB3["B-3. 포크 상승 및 트럭 적재면 탐색"]
+            direction LR
+
+            T14["T14<br/>RAISE_FORK<br/>
+            set_fork_height(1.50 m)"]
+
+            TD4{"TD4<br/>포크 높이가<br/>1.50 m인가?"}
+
+            T15["T15<br/>INITIALIZE_LASER_MONITOR<br/>
+            laser_L_prev = laser_L<br/>
+            laser_R_prev = laser_R"]
+
+            T16["T16<br/>SLOW_FORWARD_COMMAND<br/>
+            저속 전진"]
+
+            T17["T17<br/>READ_LASER<br/>
+            laser_L_current<br/>
+            laser_R_current"]
+
+            T18["T18<br/>COMPUTE_LASER_DROP<br/>
+            drop_L = prev_L - current_L<br/>
+            drop_R = prev_R - current_R"]
+
+            TD5{"TD5<br/>두 센서가 모두<br/>급감했는가?"}
+
+            T19["T19<br/>UPDATE_PREVIOUS_VALUE<br/>
+            prev_L = current_L<br/>
+            prev_R = current_R"]
+
+            T20["T20<br/>STOP_FORWARD<br/>
+            전진 정지<br/>
+            적재면 감지 완료"]
+        end
+
+        T13 --> T14 --> TD4
+        TD4 -- "아니오" --> T14
+        TD4 -- "예" --> T15
+
+        T15 --> T16 --> T17 --> T18 --> TD5
+
+        TD5 -- "아니오" --> T19
+        T19 --> T16
+
+        TD5 -- "예" --> T20
+
+        %% -----------------------------
+        %% B-4. 하강·안착·후진
+        %% -----------------------------
+        subgraph TB4["B-4. 팔레트 안착 및 지게차 이탈"]
+            direction LR
+
+            T21["T21<br/>START_SLOW_LOWERING<br/>
+            포크 저속 하강"]
+
+            T22["T22<br/>READ_RELEASE_DISTANCE<br/>
+            laser_L<br/>
+            laser_R"]
+
+            TD6{"TD6<br/>laser_L &lt; 0.05 m<br/>
+            AND<br/>
+            laser_R &lt; 0.05 m?"}
+
+            T23["T23<br/>CONTINUE_LOWERING<br/>
+            포크 천천히 하강"]
+
+            T24["T24<br/>STOP_FORK_LOWERING<br/>
+            포크 하강 정지"]
+
+            T25["T25<br/>RELEASE_PALLET<br/>
+            팔레트 적재면 안착"]
+
+            T26["T26<br/>MOVE_BACKWARD_CLEARANCE<br/>
+            move_backward<br/>
+            1.00 m + 0.50 m"]
+
+            TD7{"TD7<br/>후진 거리<br/>1.50 m 도달?"}
+
+            T27["T27<br/>TRUCK_LOADING_COMPLETE<br/>
+            loading_complete = true"]
+
+            DONE(["TASK_COMPLETE"])
+        end
+
+        T20 --> T21 --> T22 --> TD6
+
+        TD6 -- "아니오" --> T23
+        T23 --> T22
+
+        TD6 -- "예" --> T24
+        T24 --> T25 --> T26 --> TD7
+
+        TD7 -- "아니오" --> T26
+        TD7 -- "예" --> T27 --> DONE
+    end
+end
+
+%% =========================================================
+%% Phase 연결
+%% =========================================================
+I4 --> P0
+P15 == "mode = TRUCK_LOADING" ==> T0
+
+%% =========================================================
+%% 스타일
+%% =========================================================
+classDef startEnd fill:#263238,color:#ffffff,stroke:#111111,stroke-width:2px;
+classDef init fill:#e3f2fd,color:#0d47a1,stroke:#1565c0,stroke-width:1.5px;
+classDef config fill:#eceff1,color:#263238,stroke:#607d8b,stroke-width:1.2px;
+classDef pallet fill:#fff3e0,color:#7f3600,stroke:#ef6c00,stroke-width:1.5px;
+classDef truck fill:#e8f5e9,color:#1b5e20,stroke:#2e7d32,stroke-width:1.5px;
+classDef decision fill:#ffebee,color:#b71c1c,stroke:#c62828,stroke-width:2px;
+
+class I0,DONE startEnd;
+class I1,I2,I3,I4 init;
+class ID0,PD0,PD1,PD2,PD3,PD4,PD5,TD0,TD1,TD2,TD3,TD4,TD5,TD6,TD7 decision;
+
+class CFG1,CFG2,CFG3,CFG4,CFG5 config;
+
+class P0,P1,P2,P3,P4,P5,P6,P7,P8L,P8R,P9,P10,P11L,P11R,P12,P13,P14,P15 pallet;
+
+class T0,T1,T2,T3,T4,T5,T6,T7,T8,T9L,T9R,T10,T11,T12L,T12R,T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23,T24,T25,T26,T27 truck;
+
+style MAIN fill:none,stroke:#90a4ae,stroke-width:1px

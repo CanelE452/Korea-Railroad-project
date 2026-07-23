@@ -18,10 +18,8 @@ scripts/data_prep/
 ├── eval/                       모델 평가 + 필터 P/R (4 files)
 ├── visualize/                  Annotation / Pretrain 시각화 (2 files)
 ├── validate/                   데이터 검증 / 병합 (2 files)
-├── inference/                  Pseudo-label 생성 v1~v4 (6 files, legacy)
-├── ablation/                   Loss / pnp ablation 분석 (3 files)
-├── filter_compare/             옛 filter 비교 (3 files, legacy)
-└── debug/                      1회성 디버그 `_` prefix (14 files)
+├── inference/                  Pseudo-label 생성 (v4 canonical + 보조 2, 3 files)
+└── ablation/                   Loss / pnp ablation 분석 (3 files)
 ```
 
 ## Shared Library (루트)
@@ -98,19 +96,16 @@ python scripts/data_prep/eval/filter_pr_eval.py --weights <path> --gt_dir <path>
 | `merge_and_validate.py` | 배치 병합 + visibility 필터링 |
 | `verify_keypoints.py` | Keypoint 기하학 자동 검증 (Y=UP convention) |
 
-## `inference/` — Pseudo-label 생성 파이프라인 (v1~v4, legacy)
+## `inference/` — Pseudo-label 생성 파이프라인
 
 RANSAC 필터 도입 (2026-04-11) 이전 세대. 현재는 `scripts/self_training/
-self_train.py` 로 통합되었고, 이 폴더는 ablation / 비교용으로 보존.
+self_train.py` 로 통합됨. legacy v1~v3 및 `extract_pl_v5.py` 는 2026-07-23 정리 삭제.
 
 | 파일 | 설명 |
 |------|------|
-| `infer_and_filter.py` | v1 — 초기 버전 |
-| `infer_and_filter_v2.py` | v2 — filter A/B/C/D 조합 추가 |
-| `infer_and_filter_v3.py` | v3 — B / C / D 분리 |
 | `infer_and_filter_v4.py` | v4 — B / C 만 (canonical 최종) |
 | `infer_test_data.py` | 테스트 데이터 추론 |
-| `generate_pseudo_labels.py` | batch pseudo-label 생성 (v2 계열) |
+| `generate_pseudo_labels.py` | batch pseudo-label 생성 |
 
 ## `ablation/` — Loss / pnp ablation 분석
 
@@ -119,21 +114,6 @@ self_train.py` 로 통합되었고, 이 폴더는 ablation / 비교용으로 보
 | `compare_struct_ablation.py` | v8_A / B2 / B3 PnP rate + B∧C 비교 (Loss Ablation T2) |
 | `measure_vp_scale.py` | VP loss magnitude 측정 (λ 캘리브레이션) |
 | `calibrate_pnp_thresholds.py` | PnP threshold 교정 |
-
-## `filter_compare/` — 옛 필터 비교 (legacy)
-
-| 파일 | 설명 |
-|------|------|
-| `compare_filters.py` | 2 모델 필터 비교 (legacy) |
-| `compare_filters_3models.py` | 3 모델 필터 비교 (legacy) |
-| `compare_filters_5models.py` | 5 모델 필터 비교 (legacy) |
-
-현재 필터 선정은 `eval/filter_pr_eval.py` 로 통합됨.
-
-## `debug/` — 1회성 디버그 스크립트 (`_` prefix)
-
-AprilTag / keypoint / pose 디버깅 과정에서 생성된 일회용 스크립트 14 개.
-보존만 하고 재사용하지 않음.
 
 ## 주의사항
 

@@ -46,25 +46,21 @@ MODEL_PATH_6D_YOLO = _os.environ.get(
 # (DOPE 검출 실패 시 fallback 또는 시각화 비교 용도). False (default) 면 DOPE 만.
 # DOPE 만 쓰는 환경에선 False — YOLO 모델 로드 시간/메모리 절약 + HUD 가 깔끔.
 USE_PERCEPTION_YOLO = False
-# DOPE 가중치 경로 — challenge/model/ 안의 .pth 를 파일명 상관없이 자동 탐색.
-# 환경변수 MODEL_PATH_6D 로 override 가능 (HuggingFace 등 다른 위치 사용 시).
+# DOPE 가중치 경로 — 25y_automatic_lifter-master/models/ 안의 .pth 를 자동 탐색.
+# 환경변수 MODEL_PATH_6D 로 override 가능 (HuggingFace 등 다른 위치 사용 시 — 권장).
 def _resolve_model_path_6d():
-    """challenge/model/ 폴더의 .pth 를 이름 상관없이 자동 선택.
-    우선순위: ① 환경변수 MODEL_PATH_6D → ② 폴더 내 유일 .pth →
-              ③ 여러 개면 challengenight.pth 우선(기존 호환), 없으면 이름순 첫 .pth."""
+    """DOPE 6D 가중치 경로 해석.
+    우선순위: ① 환경변수 MODEL_PATH_6D → ② 25y_automatic_lifter-master/models/ 내
+              유일 .pth → ③ 여러 개면 이름순 첫 .pth. (없으면 명확한 에러용 기본 경로)"""
     env = _os.environ.get("MODEL_PATH_6D")
     if env:
         return env
-    model_dir = _REPO_ROOT / "challenge" / "model"
+    # _CONFIG_DIR.parents[2] = outer 25y_automatic_lifter-master (models/ 는 그 하위)
+    model_dir = _CONFIG_DIR.parents[2] / "models"
     pths = sorted(model_dir.glob("*.pth")) if model_dir.is_dir() else []
     if not pths:
-        # 폴더 비었으면 기존 기본 경로 반환 (런타임 load 시 명확한 에러)
-        return str(model_dir / "challengenight.pth")
-    if len(pths) == 1:
-        return str(pths[0])
-    for p in pths:
-        if p.name == "challengenight.pth":
-            return str(p)
+        # 폴더 비었으면 기본 경로 반환 (런타임 load 시 명확한 에러 + MODEL_PATH_6D 안내)
+        return str(model_dir / "dope_6d.pth")
     return str(pths[0])
 
 MODEL_PATH_6D = _resolve_model_path_6d()
