@@ -161,6 +161,11 @@ def main():
     )
     ap.add_argument("--no-raw", action="store_true",
                     help="학습용 raw color 녹화 비활성 (default: 활성)")
+    ap.add_argument("--truck-after-done", action="store_true",
+                    help="파렛트 FSM DONE 후 트럭 적재 Phase B 로 자동 핸드오프 "
+                         "(다이어그램 P15→T0). truck_main.run_phase_b 호출")
+    ap.add_argument("--truck-camera-id", type=int, default=-1,
+                    help="Phase B Camera2 OpenCV 인덱스 (-1 = 스캔)")
     args = ap.parse_args()
     record_raw = not args.no_raw
 
@@ -733,6 +738,30 @@ def main():
             elif key == ord('r'):
                 recording = not recording
                 print("🔴 녹화 시작" if recording else "⏹️ 녹화 중지")
+
+            # 10) 파렛트 완료 → 트럭 적재 핸드오프 (다이어그램 P15 ⇒ T0)
+            #     같은 프로세스에서 센서만 교체: RealSense/DOPE 정지 후
+            #     Camera2 + Laser L/R + SMOKE 로 전환. CAN 은 그대로 유지.
+            if args.truck_after_done and fsm.state == "DONE":
+                print("🚚 [P15→T0] 파렛트 완료 — 트럭 적재 Phase B 핸드오프")
+                try:
+                    if video_writer is not None:
+                        video_writer.release()
+                        video_writer = None
+                    if raw_video_writer is not None:
+                        raw_video_writer.release()
+                        raw_video_writer = None
+                    pipeline.stop()          # Camera1(RealSense RGB-D) 해제
+                    cv2.destroyAllWindows()
+                except Exception as _e:
+                    print(f"⚠ Phase A 센서 해제 중 오류 (계속): {_e}")
+                from truck_main import run_phase_b
+                final_state = run_phase_b(
+                    skip_can_init=True,       # CAN 재사용
+                    camera_id=args.truck_camera_id,
+                )
+                print(f"🚚 Phase B 종료 상태: {final_state}")
+                break
 
     finally:
         print("프로그램 종료 처리 중...")
