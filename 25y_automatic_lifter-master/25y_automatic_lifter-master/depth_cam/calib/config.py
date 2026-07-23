@@ -231,3 +231,71 @@ FWD_BIAS  = 0.0
 FWD_MIN_SEC = 1.0
 FWD_MAX_SEC = 15.0
 
+# =============================================================================
+# CAN 모드 전환 / 리프트 (calib/can + mission FSM 용)
+# =============================================================================
+# 모드 프레임 송신 후 차량 컨트롤러가 모드를 소화할 시간 (s).
+# 모드 전환 레이스 (파렛트 단계 오류 의심 원인) 방지용 settle.
+MODE_SWITCH_SETTLE_S = 0.2
+
+# 파렛트 픽업 리프트 높이 (다이어그램 CFG4: PALLET_LIFT = 0.20 m)
+PALLET_LIFT_M = 0.20
+
+# 리프트 속도 (m/s) — ⚠ 현장 캘리브레이션 필요 (벤치 5단계: 적재 상태로
+# 0.5m 상승 시간 실측 → 갱신). 시간 기반 open-loop 리프트의 핵심 상수.
+LIFT_SPEED_MPS = 0.10
+
+# 리프트 명령 시간 안전 클램프 (s)
+LIFT_MIN_SEC = 0.3
+LIFT_MAX_SEC = 30.0
+
+# =============================================================================
+# Phase B — 트럭 적재 (truck_loading/다이어그램.txt CFG4 상수)
+# =============================================================================
+TRUCK_HEIGHT_M = 1.50          # 트럭 적재면 높이 → T14 포크 상승 목표
+TRUCK_SAFETY_MARGIN_M = 0.50   # 안전점: forward_truck - 0.50 m 에서 정지
+FORK_LENGTH_M = 1.00           # 포크 길이 (후진 이탈 거리 계산)
+RELEASE_THRESHOLD_M = 0.05     # 하강 종료: laser L/R < 0.05 m
+
+# 후진 이탈 거리 = FORK_LENGTH + SAFETY_MARGIN (다이어그램 T26: 1.50 m)
+BACKOUT_DIST_M = FORK_LENGTH_M + TRUCK_SAFETY_MARGIN_M
+
+# ---- 트럭 접근 허용치 (파렛트와 별도 튜닝 가능) ----
+TRUCK_YAW_TOL_DEG = 3.0
+TRUCK_OFF_TOL_M = 0.15
+
+# ---- 적재면 모서리 감지 (레이저 동시 급감, T15~T20/TD5) ----
+LASER_DROP_THRESH_M = 0.30     # prev - current 가 이보다 크면 "급감"
+LASER_DROP_SYNC_S = 0.3        # 좌/우 급감 동시성 허용 창 (s)
+LASER_CONFIRM_N = 2            # 연속 N 회 판정 시 확정 (디바운스)
+LASER_STALE_S = 0.5            # 이 시간 이상 샘플 없으면 stale → FAULT
+
+# ---- 저속 전진/하강 속도 모델 (open-loop 시간 계산용, 현장 캘리브레이션) ----
+SLOW_FWD_MPS = 0.10            # forward_slow 템플릿 실측 속도
+LOWER_SPEED_MPS = 0.08         # lift_down 저속 하강 실측 속도
+
+# ---- TFmini-S 레이저 배선 (사용자: 2개 장착, 배선 형태 미확정 → 둘 다 지원) ----
+# "single_port": 한 시리얼 스트림에 L1/L2 두 채널 (아두이노 합산 송신)
+# "dual_port"  : COM 포트 2개에 각각 1채널
+LASER_WIRING = _os.environ.get("LASER_WIRING", "single_port")
+LASER_PORT = _os.environ.get("LASER_PORT", "auto")        # single_port 모드
+LASER_PORT_L = _os.environ.get("LASER_PORT_L", "auto")    # dual_port 모드
+LASER_PORT_R = _os.environ.get("LASER_PORT_R", "auto")
+LASER_BAUD = 115200
+LASER_CH_L = 1   # 왼쪽 포크 = L1
+LASER_CH_R = 2   # 오른쪽 포크 = L2
+
+# ---- Camera2 (포크 장착) → 포크 frame extrinsic ----
+# ⚠ 실측 전 placeholder = 항등. 포크에 장착된 카메라라 포크 높이가 변하면
+# extrinsic 도 변함 → 트럭 pose 는 T14 상승 *전* (알려진 높이) 에서만 신뢰.
+CAM2_TO_FORK_T = [0.0, 0.0, 0.0]       # m
+CAM2_TO_FORK_RPY_DEG = [0.0, 0.0, 0.0]  # deg
+
+# ---- SMOKE (truck_loading 번들) ----
+# geometry_v2 번들 디렉토리 — truck_main.py 가 sys.path 에 추가해 import.
+TRUCK_SMOKE_BUNDLE_DIR = str(
+    _REPO_ROOT / "truck_loading" / "geometry_v2_live_camera_laser_ready_20260723"
+)
+TRUCK_DET_SCORE_THR = 0.25     # SMOKE detection 최소 score
+TRUCK_CONFIRM_FRAMES = 3       # 연속 N 프레임 유효 검출 시 snapshot (시간적 게이팅)
+

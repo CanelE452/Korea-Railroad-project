@@ -4,11 +4,15 @@ from typing import Optional
 
 from calib.control import (
     issue_command_forward,
+    issue_command_forward_slow,
     issue_command_backward,
     issue_command_forward_and_turn,
     issue_command_backward_and_turn,
     issue_command_rotate_in_place,
     issue_command_stop,
+    issue_lift_up,
+    issue_lift_down,
+    issue_lift_stop,
 )
 
 # HUD/로그에서 사람이 읽기 쉬운 라벨
@@ -22,6 +26,10 @@ HUMAN_NAME = {
     "ROT_LEFT": "제자리 좌회전",
     "ROT_RIGHT": "제자리 우회전",
     "STOP": "정지",
+    "FWD_SLOW": "저속 전진",
+    "LIFT_UP": "포크 상승",
+    "LIFT_DOWN": "포크 하강",
+    "LIFT_STOP": "리프트 정지",
     # 새 플로우 가독성용(실제 실행은 ROT_LEFT/ROT_RIGHT로 이행)
     "SPIN_LEFT_UNTIL_DETECTED": "제자리 좌회전(탐지 대기)",
     "SPIN_RIGHT_UNTIL_DETECTED": "제자리 우회전(탐지 대기)",
@@ -106,5 +114,18 @@ class CommandExecutor:
 
         elif mapped_cmd == "STOP":
             issue_command_stop()
+
+        elif mapped_cmd == "FWD_SLOW":
+            issue_command_forward_slow()
+
+        # ---- 리프트 (모드 시퀀스는 calib/can/commands.py 가 캡슐화) ----
+        elif mapped_cmd == "LIFT_UP":
+            issue_lift_up()
+
+        elif mapped_cmd == "LIFT_DOWN":
+            issue_lift_down()
+
+        elif mapped_cmd == "LIFT_STOP":
+            issue_lift_stop()
 
         return mapped_cmd
