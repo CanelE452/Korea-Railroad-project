@@ -1,3 +1,9 @@
+# =============================================================================
+# ⚠ DEPRECATED (참고용 v1 텔레옵) — 자율주행 코드는 depth_cam/calib/can/ 사용.
+#   이 파일의 CAN ID 는 0x01E4/0x02E4 로 나머지 구현(0x01E3/0x02E3)과 다르고,
+#   lift_up/lift_down 코드도 v2 와 반대다. 실측 바이트값 보존을 위해 남겨둠.
+#   프로토콜 단일 진실: depth_cam/calib/can/protocol.py
+# =============================================================================
 from canlib import canlib, Frame  # ← Frame import 추가!
 import asyncio
 import keyboard
